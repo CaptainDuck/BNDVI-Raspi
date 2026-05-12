@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel capture-panel">
+  <div class="panel-head">
+    <h2>New capture</h2>
+    {% if dev_mode %}<span class="badge badge-dev">DEV MODE</span>{% endif %}
+  </div>
+  <form id="capture-form" class="capture-form">
+    <input type="text" name="label" id="label" placeholder="Label (e.g. tomato row 2)">
+    <input type="text" name="notes" id="notes" placeholder="Notes (optional)">
+    <button type="submit" id="capture-btn">Capture now</button>
+  </form>
+  <details class="advanced">
+    <summary>Advanced: NIR-leakage correction</summary>
+    <p class="muted small">
+      Blue Bayer pixels also pick up some NIR. If enabled, we estimate
+      visible blue as <code>max(ε, B − k·R)</code> before computing BNDVI.
+      Public Lab uses <code>k = 0.8</code> as a default for Pi NoIR + Rosco #2007;
+      calibrate against a white reference under sunlight for best results.
+    </p>
+    <label class="check">
+      <input type="checkbox" id="correct-nir">
+      Subtract NIR leakage from blue channel
+    </label>
+    <label class="num">
+      <span>k =</span>
+      <input type="number" id="nir-k" min="0" max="2" step="0.05" value="0.8">
+    </label>
+  </details>
+  <p id="capture-status" class="status hidden"></p>
+</section>
+
+{% if chart_points %}
+<section class="panel">
+  <div class="panel-head"><h2>Mean BNDVI over time</h2></div>
+  <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>Captures ({{ records|length }})</h2></div>
+  {% if not records %}
+    <p class="muted">No captures yet. Hit "Capture now" above to take your first one.</p>
+  {% else %}
+    <div class="gallery">
+      {% for r in records %}
+        <a class="card" href="{{ url_for('detail', capture_id=r.id) }}">
+          <img class="card-thumb"
+               src="{{ url_for('captures_file', filename=r.files.thumb) }}"
+               alt="BNDVI thumbnail">
+          <div class="card-body">
+            <div class="card-row">
+              <span class="card-id">{{ r.timestamp }}</span>
+              <span class="badge badge-{{ r.classification }}">{{ r.classification }}</span>
+            </div>
+            <div class="card-mean">Mean BNDVI: <b>{{ "%+.3f"|format(r.stats.mean) }}</b></div>
+            {% if r.label %}<div class="card-label">{{ r.label }}</div>{% endif %}
+            <div class="bar">
+              <span class="bar-h" style="width: {{ r.stats.healthy_pct }}%"></span>
+              <span class="bar-m" style="width: {{ r.stats.moderate_pct }}%"></span>
+              <span class="bar-s" style="width: {{ r.stats.stressed_pct }}%"></span>
+            </div>
+            <div class="card-pcts muted">
+              H {{ "%.0f"|format(r.stats.healthy_pct) }}%
+              · M {{ "%.0f"|format(r.stats.moderate_pct) }}%
+              · S {{ "%.0f"|format(r.stats.stressed_pct) }}%
+            </div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+{% if chart_points %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  window.__chartPoints = {{ chart_points|tojson }};
+</script>
+{% endif %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

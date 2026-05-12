@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Capture {{ r.id }} — BNDVI Dashboard{% endblock %}
+
+{% block content %}
+
+<a class="back-link" href="{{ url_for('index') }}">&larr; Back to dashboard</a>
+
+<section class="panel">
+  <div class="panel-head detail-head">
+    <h2>{{ r.timestamp }}</h2>
+    <span class="badge badge-{{ r.classification }}">{{ r.classification }}</span>
+  </div>
+
+  <form id="meta-form" class="meta-form" data-id="{{ r.id }}">
+    <input type="text" name="label" value="{{ r.label or '' }}" placeholder="Label">
+    <input type="text" name="notes" value="{{ r.notes or '' }}" placeholder="Notes">
+    <button type="submit">Save</button>
+  </form>
+
+  <div class="image-grid">
+    <figure>
+      <img src="{{ url_for('captures_file', filename=r.files.raw) }}" alt="Raw">
+      <figcaption>Raw (Infrablue) — healthy plants look pinkish</figcaption>
+    </figure>
+    <figure>
+      <img src="{{ url_for('captures_file', filename=r.files.heatmap) }}" alt="Heatmap">
+      <figcaption>BNDVI heatmap with statistics</figcaption>
+    </figure>
+    <figure>
+      <img src="{{ url_for('captures_file', filename=r.files.falsecolor) }}" alt="False-colour">
+      <figcaption>False-colour map (green=healthy, red=stressed)</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Statistics</h2></div>
+  <div class="stats-grid">
+    <div><span class="muted">Mean</span><b>{{ "%+.4f"|format(r.stats.mean) }}</b></div>
+    <div><span class="muted">Median</span><b>{{ "%+.4f"|format(r.stats.median) }}</b></div>
+    <div><span class="muted">Min</span><b>{{ "%+.4f"|format(r.stats.min) }}</b></div>
+    <div><span class="muted">Max</span><b>{{ "%+.4f"|format(r.stats.max) }}</b></div>
+    <div><span class="muted">Std dev</span><b>{{ "%.4f"|format(r.stats.std) }}</b></div>
+  </div>
+
+  <h3 class="section-h3">Vegetation breakdown</h3>
+  <div class="bar tall">
+    <span class="bar-h" style="width: {{ r.stats.healthy_pct }}%"></span>
+    <span class="bar-m" style="width: {{ r.stats.moderate_pct }}%"></span>
+    <span class="bar-s" style="width: {{ r.stats.stressed_pct }}%"></span>
+  </div>
+  <ul class="legend">
+    <li><span class="dot dot-h"></span>Healthy (BNDVI &gt; 0.3): <b>{{ "%.1f"|format(r.stats.healthy_pct) }}%</b></li>
+    <li><span class="dot dot-m"></span>Moderate (0.1 – 0.3): <b>{{ "%.1f"|format(r.stats.moderate_pct) }}%</b></li>
+    <li><span class="dot dot-s"></span>Stressed (BNDVI &lt; 0.1): <b>{{ "%.1f"|format(r.stats.stressed_pct) }}%</b></li>
+  </ul>
+
+  <h3 class="section-h3">Capture settings</h3>
+  <ul class="kv">
+    <li><span>Resolution</span><b>{{ r.settings.resolution[0] }} × {{ r.settings.resolution[1] }} px</b></li>
+    <li><span>Exposure</span><b>{{ r.settings.exposure_us }} μs</b></li>
+    <li><span>Analogue gain</span><b>{{ r.settings.gain }}</b></li>
+    <li><span>Mode</span><b>{{ "synthetic (dev)" if r.settings.dev_mode else "camera" }}</b></li>
+    <li>
+      <span>NIR-leakage correction</span>
+      <b>
+        {% if r.settings.correct_nir_leakage %}
+          on (k = {{ r.settings.nir_leak_coef }})
+        {% else %}
+          off
+        {% endif %}
+      </b>
+    </li>
+  </ul>
+</section>
+
+<section class="panel danger">
+  <div class="panel-head"><h2>Danger zone</h2></div>
+  <button id="delete-btn" data-id="{{ r.id }}" class="btn-danger">Delete this capture</button>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='detail.js') }}"></script>
+{% endblock %}
