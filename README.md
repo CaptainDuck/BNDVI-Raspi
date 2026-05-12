@@ -40,6 +40,10 @@ disclosure, or `bndvi.py --correct-nir --k 0.8` on the CLI). See
 - Pi NoIR Camera v2 with the bundled blue filter installed in the lens cap
 - Power supply, microSD with Raspberry Pi OS (Bookworm)
 
+See **[HARDWARE.md](./HARDWARE.md)** for the full bill of materials, how
+to connect the camera, and how to mount the bundled blue filter without
+damaging the lens.
+
 ## Setup on the Pi
 
 ```bash
@@ -109,6 +113,7 @@ and exposure, and how to tune the NIR-leakage coefficient `k`.
 ```
 .
 ├── README.md                     this file
+├── HARDWARE.md                   bill of materials + filter mounting guide
 ├── CALIBRATION.md                calibration walkthrough
 ├── CLAUDE.md                     notes for future Claude Code sessions
 ├── Requirements.md               course assignment brief
