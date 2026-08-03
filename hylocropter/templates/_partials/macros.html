@@ -1,0 +1,41 @@
+{# Reusable fragments. Kept small and boring on purpose. #}
+
+{% macro band_tag(classification, extra='') -%}
+  {%- set labels = {'healthy': 'Doing well', 'moderate': 'Keep an eye',
+                    'stressed': 'Needs a look', 'failed': 'Photo failed'} -%}
+  <span class="tag tag-{{ classification or 'failed' }}" {{ extra|safe }}>
+    {{- labels.get(classification, 'No reading') -}}
+  </span>
+{%- endmacro %}
+
+{% macro health_bar(stats, small=False) -%}
+  {# Percentages are already 0-100 and sum to ~100, so they drop straight into
+     flex widths. #}
+  <div class="hbar {{ 'sm' if small }}" role="img"
+       aria-label="{{ '%.0f'|format(stats.healthy_pct or 0) }}% doing well,
+                   {{ '%.0f'|format(stats.moderate_pct or 0) }}% keep an eye,
+                   {{ '%.0f'|format(stats.stressed_pct or 0) }}% needs a look">
+    <span class="h" style="width:{{ stats.healthy_pct or 0 }}%"></span>
+    <span class="m" style="width:{{ stats.moderate_pct or 0 }}%"></span>
+    <span class="s" style="width:{{ stats.stressed_pct or 0 }}%"></span>
+  </div>
+{%- endmacro %}
+
+{% macro stat(label, value, id=None) -%}
+  <div class="stat">
+    <span class="stat-label">{{ label }}</span>
+    <span class="stat-value"{% if id %} id="{{ id }}"{% endif %}>{{ value }}</span>
+  </div>
+{%- endmacro %}
+
+{% macro kv(label, value) -%}
+  <div class="kv-row"><span>{{ label }}</span><span>{{ value }}</span></div>
+{%- endmacro %}
+
+{% macro signed(v, digits=3) -%}
+  {%- if v is none -%}—{%- else -%}{{ '%+.*f'|format(digits, v) }}{%- endif -%}
+{%- endmacro %}
+
+{% macro dot(classification) -%}
+  <span class="dot dot-{{ classification or 'stressed' }}"></span>
+{%- endmacro %}

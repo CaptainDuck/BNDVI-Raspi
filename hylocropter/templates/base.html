@@ -1,0 +1,107 @@
+{#
+  Shared shell: brand, live status chips, tab nav, alert banner.
+  Every asset below is local — nothing on this page reaches the network at run
+  time, which is the whole argument of the project. See DEPLOYMENT.md.
+#}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Hylocropter{% endblock %}</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+<link rel="alternate icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<meta name="theme-color" content="#f5ead8">
+<link rel="stylesheet" href="{{ url_for('static', filename='fonts/fonts.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar hc-noprint">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ url_for('page_map') }}">
+        {# quadcopter seen from above: four rotors, crossed arms, camera at the centre #}
+        <svg width="38" height="38" viewBox="0 0 40 40" role="img" aria-label="Hylocropter" style="flex:none;display:block">
+          <g stroke="var(--color-accent-2-600)" stroke-width="2.8" stroke-linecap="round">
+            <line x1="13" y1="13" x2="27" y2="27"></line>
+            <line x1="27" y1="13" x2="13" y2="27"></line>
+          </g>
+          <g fill="var(--color-accent-2-400)">
+            <circle cx="7.6" cy="7.6" r="4.6"></circle>
+            <circle cx="32.4" cy="7.6" r="4.6"></circle>
+            <circle cx="7.6" cy="32.4" r="4.6"></circle>
+            <circle cx="32.4" cy="32.4" r="4.6"></circle>
+          </g>
+          <circle cx="20" cy="20" r="7.2" fill="var(--color-accent)"></circle>
+          <circle cx="20" cy="20" r="2.9" fill="var(--color-bg)"></circle>
+        </svg>
+        <span style="display:flex;flex-direction:column">
+          <span class="brand-name">Hylocropter</span>
+          <span class="brand-sub">{{ cfg.farm_name }} · {{ cfg.farm_location }}</span>
+        </span>
+      </a>
+      <div class="chips">
+        <span class="tag {{ 'tag-healthy' if telemetry.connected else 'tag-stressed' }}"
+              id="chip-drone" style="gap:6px" title="{{ telemetry.detail }}">
+          <span class="chip-dot pulse"></span>
+          <span class="chip-text">{{ 'Connected to drone' if telemetry.connected
+            else ('Drone link lost' if telemetry.status == 'stale' else 'Drone not connected') }}</span>
+        </span>
+        <span class="tag {{ 'tag-healthy' if camera.available else ('tag-neutral' if camera.synthetic else 'tag-stressed') }}"
+              id="chip-camera" style="gap:6px" title="{{ camera.detail }}">
+          <span class="chip-dot"></span>
+          <span class="chip-text">{{ 'Camera ready' if camera.available
+            else ('Synthetic frames' if camera.synthetic else 'No camera') }}</span>
+        </span>
+        <span class="tag tag-neutral" id="chip-battery"
+              {% if telemetry.battery_pct is none %}hidden{% endif %}>
+          Battery {{ telemetry.battery_pct }}%
+        </span>
+      </div>
+    </div>
+    <nav class="tabs" aria-label="Main">
+      <a class="tab {{ 'is-active' if view in ('map', 'capture', 'newflight', 'processing') }}"
+         href="{{ url_for('page_map') }}">Farm map</a>
+      <a class="tab {{ 'is-active' if view == 'history' }}"
+         href="{{ url_for('page_history') }}">All flights</a>
+      <a class="tab {{ 'is-active' if view == 'debug' }}"
+         href="{{ url_for('page_debug') }}">Debug</a>
+      <a class="tab {{ 'is-active' if view == 'settings' }}"
+         href="{{ url_for('page_settings') }}">Settings</a>
+    </nav>
+  </header>
+
+  <main class="main">
+    {% if banner %}
+      <div class="banner hc-noprint">
+        <span class="banner-mark" aria-hidden="true">!</span>
+        <div>
+          <div class="banner-title">{{ banner.title }}</div>
+          <div class="banner-body">{{ banner.body }}</div>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if recording and view != 'newflight' %}
+      <div class="banner hc-noprint" style="background:var(--color-accent-2-100);border-color:var(--color-accent-2-300)">
+        <span class="banner-mark" style="color:var(--color-accent-2-800)" aria-hidden="true">●</span>
+        <div>
+          <div class="banner-title">Recording {{ recording.id }}</div>
+          <div class="banner-body" style="color:var(--color-accent-2-800)">
+            A flight is in progress — {{ recording.capture_count }} photos so far.
+            <a href="{{ url_for('page_new_flight') }}">Open the flight page</a>.
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/core.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

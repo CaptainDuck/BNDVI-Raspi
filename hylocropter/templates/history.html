@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import band_tag, health_bar, dot %}
+{% block title %}All flights — Hylocropter{% endblock %}
+
+{% block content %}
+<div class="row" style="margin-bottom:16px">
+  <div class="grow">
+    <h2 style="margin:0 0 2px">All flights</h2>
+    <p class="page-sub" id="history-count">
+      {{ flights|length }} flight{{ '' if flights|length == 1 else 's' }} on record,
+      newest first
+    </p>
+  </div>
+  <input class="input" type="search" id="history-search" style="max-width:260px"
+         placeholder="Search by block or date" aria-label="Search flights">
+</div>
+
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px" id="block-filters">
+  <button class="pill is-active" data-block="All">All</button>
+  {% for block in cfg.blocks %}
+    <button class="pill" data-block="{{ block }}">{{ block }}</button>
+  {% endfor %}
+</div>
+
+{% if flights %}
+  <div id="history-list">
+    {% set groups = {} %}
+    {% for f in flights %}
+      {% set key = f.started_at[:7] %}
+      {% if groups.update({key: (groups.get(key, []) + [f])}) %}{% endif %}
+    {% endfor %}
+    {% for key, rows in groups.items() %}
+      <div class="history-group" style="margin-bottom:26px">
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700);margin-bottom:9px">
+          {{ key }}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          {% for f in rows %}
+            <a class="card elev-sm history-row"
+               href="{{ url_for('page_map', flight=f.id) }}"
+               data-name="{{ f.name }}"
+               data-search="{{ (f.name ~ ' ' ~ f.started_at ~ ' ' ~ f.id)|lower }}"
+               style="flex-direction:row;align-items:center;gap:var(--space-3);
+                      padding:var(--space-3);text-decoration:none;color:inherit">
+              {{ dot(f.classification) }}
+              <div style="min-width:0;margin-right:auto">
+                <div style="font-size:15px">{{ f.name }}</div>
+                <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+                  {{ f.started_at|replace('T', ' ') }} ·
+                  {{ f.capture_count }} photo{{ '' if f.capture_count == 1 else 's' }}
+                  {%- if f.duration_s and f.duration_s >= 60 %} · {{ (f.duration_s // 60) }} min{% endif %}
+                  {%- if f.status == 'recording' %} · recording now{% endif %}
+                </div>
+              </div>
+              {% if f.stats %}{{ health_bar(f.stats, small=True) }}{% endif %}
+              {{ band_tag(f.classification if f.status != 'recording' else 'failed') }}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="card elev-sm empty" id="history-empty" hidden>
+    <h3 style="margin:0 0 4px">Nothing matches that</h3>
+    <p>Try another block name, or clear the search.</p>
+  </div>
+{% else %}
+  <div class="card elev-sm empty">
+    <div class="empty-mark"></div>
+    <h3 style="margin:0">No flights yet</h3>
+    <p>Flights appear here once the drone has flown a mission with the camera
+      recording.</p>
+    <a class="btn btn-primary" href="{{ url_for('page_new_flight') }}">Start a flight</a>
+  </div>
+{% endif %}
+
+{% if ground_captures %}
+  <h3 class="section-h">Ground captures</h3>
+  <p class="page-sub" style="margin-bottom:12px">Photos taken without a flight,
+    including any brought forward from the old dashboard.</p>
+  <div class="grid grid-thumbs">
+    {% for c in ground_captures %}{% include "_partials/thumb.html" %}{% endfor %}
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
+{% endblock %}

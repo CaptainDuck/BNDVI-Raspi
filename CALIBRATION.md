@@ -1,136 +1,210 @@
 # Calibration Guide
 
-How to set up the Pi NoIR v2 + Rosco #2007 blue filter so the BNDVI
-numbers are actually meaningful, and how to verify it.
+How to set up the Pi NoIR v2 + Rosco #2007 blue filter so the BNDVI numbers
+actually mean something, and how to verify it.
+
+Everything here is now doable from the **Debug** view in the dashboard. The old
+version of this guide told you to edit constants in `bndvi.py` with a text editor
+and inspect pixel values in a file browser; you don't need to any more.
 
 ## Why calibration matters
 
-BNDVI is a ratio of channel intensities, so anything the camera does to
-each channel independently corrupts the index. The two automatic
-features we have to turn off are **AWB** and **AE**.
+BNDVI is a ratio between two channels, so anything the camera does to each
+channel *independently* corrupts it. Two automatic features have to be off.
 
 ### AWB (Auto White Balance)
 
-The camera continuously tweaks the gain on each colour channel
-independently so "white things look white." If the scene leans green
-(lots of vegetation), AWB *boosts* blue and red to compensate. This is
-great for snapshots but **catastrophic for BNDVI** — the absolute ratio
-between Red and Blue is exactly the quantity we're measuring. With AWB
-on, your BNDVI number reflects how the firmware feels about the scene,
-not what's actually there.
+The camera continuously adjusts the gain on each colour channel so "white things
+look white". If the scene leans green, AWB boosts blue and red to compensate.
+Great for snapshots, **catastrophic for BNDVI** — the ratio between Red and Blue
+is exactly the quantity being measured. With AWB on, your BNDVI reflects how the
+firmware feels about the scene, not what's there.
 
 ### AE (Auto Exposure)
 
-The camera adjusts shutter time and gain to keep the image "well exposed"
-on average. Bad for BNDVI because:
+The camera adjusts shutter and gain to keep the image "well exposed". Bad here
+because:
 
-1. Two captures of the same plant seconds apart can end up at different
-   exposures, making the numbers non-comparable across time.
+1. Two captures of the same plant seconds apart can land at different exposures,
+   making them non-comparable over time.
 2. Auto-gain can clip or under-expose individual channels differently.
 
 ### What "locked" means
 
-Locking = turning both auto-modes off and pinning shutter and gain to
-fixed numbers, so every frame uses identical camera settings.
+Both autos off, and shutter, gain **and colour gains** pinned to fixed numbers.
+That last one matters: `AwbEnable: False` on its own just freezes whatever gains
+the algorithm last chose, which is not repeatable between boots. Setting
+`ColourGains` is what actually pins it.
 
 ## How the code does it
 
-In `bndvi.py`, inside `capture_image()`:
+In `bndvi.py`, `locked_controls()`:
 
 ```python
-cam.set_controls({
-    "AwbEnable":    False,    # turn off auto white balance
-    "AeEnable":     False,    # turn off auto exposure
-    "AnalogueGain": 2.0,      # fix ISO-style gain at 2×
-    "ExposureTime": 5000,     # fix shutter at 5000 μs (≈ 1/200 s)
-})
+{
+    "AwbEnable":    False,      # no auto white balance
+    "AeEnable":     False,      # no auto exposure/gain
+    "ColourGains":  (1.0, 1.0), # pin AWB properly
+    "AnalogueGain": 2.0,
+    "ExposureTime": 5000,       # µs, ≈ 1/200 s
+    "Sharpness":    0.0,        # sharpening is non-linear
+    "Contrast":     1.0,
+    "Saturation":   1.0,        # do not stretch channel ratios
+}
 ```
 
-The four knobs you might want to change live near the top of `bndvi.py`:
+These go into `create_still_configuration(controls=...)`, **not** a
+`set_controls()` call after `start()`. The official picamera2 examples do it this
+way, and it removes the race where the first frames come back before the locked
+values have been applied.
 
-| Constant | Default | What it controls |
+Every tunable is a setting in the dashboard, stored in
+`hylocropter_data/settings.json`, and **recorded onto every capture** — so an old
+photo always tells you what it was taken with, even after you change your mind.
+
+| Setting | Default | What it controls |
 |---|---|---|
-| `DEFAULT_GAIN` | `2.0` | Sensor gain; raise for shade, lower for harsh sun |
-| `DEFAULT_EXPOSURE_US` | `5000` (1/200 s) | Shutter time; longer = brighter, more motion-blur risk |
-| `DEFAULT_WARMUP_S` | `3` | Time to let the sensor settle after the controls are applied |
-| `DEFAULT_RESOLUTION` | `(3280, 2464)` | Full 8 MP; drop to `(1640, 1232)` for faster testing |
+| Analogue gain | 2.0 | Sensor gain; raise for shade, lower for harsh sun |
+| Exposure | 5000 µs | Shutter time; longer = brighter, more motion blur |
+| Warm-up | 3 s | Time for the sensor to settle after the controls apply |
+| Resolution | 3280 × 2464 | Full 8 MP; drop to 1280 × 960 for faster testing |
+| Capture format | JPEG | Add raw DNG for calibration-grade work (see below) |
 
-## Step-by-step calibration
+### Why JPEG isn't ideal
 
-1. **Pick your lighting and stick with it.** Direct midday sun is the
-   easiest because the spectrum is broad and stable. Bright overcast
-   also works. Avoid mixing sun and shade in one frame.
+JPEG/RGB output is gamma-encoded, and gamma is a per-channel *non-linear* curve.
+`(R−B)/(R+B)` computed on gamma-encoded 8-bit values is not the same number as on
+linear sensor counts. For a course demo the difference doesn't change the
+conclusions, but if you want defensible radiometry, switch **Settings → Capture
+format** to "+ raw DNG" and work from the Bayer frame. Costs about 10 MB per
+photo.
 
-2. **Put a white reference in the scene.** A piece of plain white
-   printer paper is fine for a course project. A grey card or Spectralon
-   panel is better but unnecessary here. Place it in the same lighting
-   as the plant you'll be measuring.
+## Step by step
 
-3. **Take a test capture** with the current defaults:
-   ```bash
-   python bndvi.py
-   ```
+### 1. Fix your lighting and stick with it
 
-4. **Open the raw JPEG** (`bndvi_output/raw_*.jpg`) and inspect the
-   white paper region:
-   - **Too dark** (looks grey/dim) → raise `DEFAULT_GAIN` (try 3.0,
-     then 4.0) or raise `DEFAULT_EXPOSURE_US` (try 8000, then 12000).
-   - **Saturated / blown out** (pure 255, no detail) → lower them
-     (gain 1.0, exposure 2000).
-   - **Goal**: the brightest pixels of the white paper should sit around
-     **180–230** in the Red and Blue channels — bright but not clipped.
+Direct midday sun is easiest — broad, stable spectrum. Bright overcast works too.
+Avoid mixing sun and shade in one frame.
 
-5. **Check the white paper's BNDVI** on the heatmap output. White
-   reflects roughly equally across NIR and visible, so a well-calibrated
-   rig should produce **BNDVI ≈ 0** on the paper.
+### 2. Put a white reference in the scene
 
-   If the paper reads:
-   - **Strongly positive** (red-channel dominant): there's NIR
-     contamination leaking through the blue channel. Turn on
-     **NIR-leakage correction** (Advanced section in the dashboard, or
-     `--correct-nir` on the CLI) and tune `k` until the paper reads
-     near zero. Start at `k = 0.8` and adjust in steps of ~0.1.
-   - **Strongly negative**: exposure on the blue channel is too high —
-     lower exposure or gain.
+Plain white printer paper is fine for a course project. A grey card is better,
+Spectralon is overkill. Put it in the same light as the plant you'll measure.
 
-6. **Now point at a known-healthy plant.** The raw image should look
-   pinkish/magenta. Mean BNDVI should land somewhere in **+0.3 to +0.7**.
-   If you get a negative value, the channel mapping has been reversed —
-   that would mean someone copied the logic from `ndvi_capture.old.py`
-   into the live code by mistake.
+### 3. Open Debug and check the exposure
 
-7. **Lock those settings for the rest of your captures.** Don't change
-   gain/exposure between captures you want to compare — otherwise your
-   time-series chart is meaningless.
+The **Live readout** and **sanity note** do the judging for you. What you want:
+
+- The white card's brightest pixels around **180–230** in both Red and Blue —
+  bright but not clipped. The Channel split panel shows each channel on its own,
+  so you can see this directly.
+- The note tells you if channels are clipping at 255 or the frame is nearly
+  black, and what to do about it.
+
+Adjust the **Exposure** and **Analogue gain** sliders. Both go to the camera, so
+the preview updates on its next frame.
+
+- Too dark → raise gain (3.0, then 4.0) or exposure (8000, then 12000)
+- Blown out → lower them (gain 1.0, exposure 2000)
+
+### 4. Solve the NIR-leakage coefficient
+
+A white reference reflects about equally across NIR and visible, so a correctly
+corrected rig reads **BNDVI ≈ 0** on it. That gives a direct solution rather than
+trial and error:
+
+```
+BNDVI = 0  ⟹  R = B − k·R  ⟹  k = B/R − 1
+```
+
+In Debug, **drag a box over the white card** in the raw feed and press **Solve k
+from the selection**. The dashboard computes it from the mean R and B inside your
+box, turns the correction on, and tells you the value.
+
+That number is *yours* — your gel, your sensor, your light. It is better than any
+value from the internet, including the `k = 0.8` this project used to quote
+without a verifiable source (see [RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §2).
+
+If the solver says no positive `k` can work, that means blue is already *below*
+NIR on white — the red channel is over-responding. Lower the exposure or gain and
+try again.
+
+### 5. Check a real plant
+
+Point at known-healthy vegetation. The raw feed should look **pinkish/magenta**,
+and mean BNDVI should land in **+0.3 to +0.7**.
+
+A negative value means the channel mapping got reversed somewhere — that would
+mean someone copied logic from `ndvi_capture.old.py`, which has the bug.
+
+### 6. Verify the lock is real
+
+This is the check that catches the failure mode with no visible symptom. Point at
+a fixed scene, then shade the subject with your hand or wait for a cloud.
+
+- **Correct:** the histogram shifts bodily brighter or darker, and the **BNDVI
+  mean barely moves**. The scene got darker; the *ratio* didn't change.
+- **Broken:** the raw brightness stays pinned. The camera is still auto-adjusting
+  and every number is meaningless.
+
+See [RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §4 — there are two open picamera2 bugs
+where the AE/AWB lock is silently ignored, so don't assume.
+
+### 7. Then stop changing things
+
+Don't change gain or exposure between captures you want to compare, or the trend
+across flights is noise. Each capture records its own settings, so the dashboard
+can tell you what a photo was taken with, but it can't retroactively make two
+different exposures comparable.
+
+## Thresholds
+
+The three health bands default to `> 0.3` healthy, `0.1–0.3` moderate, `< 0.1`
+stressed. **These are generic vegetation values, not derived for dragon fruit.**
+*Hylocereus* is a cactus with thick waxy cladodes; its reflectance won't behave
+like the leafy crops those numbers come from.
+
+Deriving real ones is your Objective 4 validation, and it's the single most
+valuable thing left to do:
+
+1. Photograph plants you have **visually classified on the ground** — clearly
+   healthy, clearly stem-cankered, and some in between.
+2. Read each mean BNDVI off its detail page.
+3. Pick the thresholds that best separate your groups. Drag the sliders in Debug
+   to watch the boundary move over a real frame.
+4. Set them in **Settings** and write the numbers into the paper with the sample
+   size.
+
+Photos keep the thresholds they were taken with, so changing these never rewrites
+history. See [RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §5.
 
 ## Common gotchas
 
-- **Indoor LED light** has almost no NIR. Plants under indoor lighting
-  won't show useful BNDVI even with a perfect rig. Calibrate and test
-  outdoors.
-- **Through glass** (windows) — most window glass blocks NIR. Don't
-  shoot through it.
-- **The 3-second warmup matters.** If you reduce `DEFAULT_WARMUP_S`,
-  the sensor's analog circuitry may not have settled, and your locked
-  exposure won't actually be applied to the captured frame.
-- **Changing time of day** changes the sun's spectrum (more red near
-  sunset). For day-over-day comparisons, capture at roughly the same
-  time of day.
+- **Indoor LED light** has almost no NIR. Plants indoors won't show useful BNDVI
+  even with a perfect rig. Calibrate outdoors.
+- **Through glass** — most window glass blocks NIR. Don't shoot through it.
+- **The warm-up matters.** Below ~3 s the sensor's analogue chain may not have
+  settled, so the locked exposure isn't really applied to the frame.
+- **Time of day changes the solar spectrum** (more red near sunset). For
+  day-over-day comparisons, capture at roughly the same hour. The thesis's own
+  sample timestamps are all ~10:00 AM.
+- **Motion blur on the drone.** 5000 µs is fine hovering; at speed, shorten the
+  exposure and raise the gain rather than accepting smear.
 
-## Quick sanity-check checklist
+## Quick checklist
 
-When something looks off, walk through this before changing the code:
-
-- [ ] AWB is off (look at the raw JPEG — does white paper read white-ish, or strongly tinted?)
-- [ ] AE is off (do two consecutive captures of the same scene give similar pixel values?)
+- [ ] AWB off — white paper reads white-ish, not strongly tinted
+- [ ] AE off — shading the scene moves brightness but not the BNDVI mean
 - [ ] No mixed sun/shade in the frame
-- [ ] Shooting in daylight, not under LEDs
+- [ ] Daylight, not LEDs
 - [ ] No glass between camera and subject
-- [ ] White reference in frame and reads BNDVI ≈ 0
-- [ ] Healthy plant looks pinkish/magenta in the raw image
+- [ ] White card peaks at 180–230 in both R and B
+- [ ] White card reads BNDVI ≈ 0 after solving `k`
+- [ ] Healthy plant looks pink and reads +0.3 to +0.7
 
 ## References
 
 - [Ned Horning — Calibrating DIY NIR cameras, Public Lab](https://publiclab.org/notes/nedhorning/10-21-2013/calibrating-diy-nir-cameras-part-1)
 - [What's that blue thing doing here? — Raspberry Pi blog](https://www.raspberrypi.com/news/whats-that-blue-thing-doing-here/)
 - [Raspberry NoIR + blue filter writeup — Public Lab](https://publiclab.org/notes/carolccarvalho/07-15-2016/raspberry-noir-cam-blue-filter)
+- [picamera2 examples — fixed exposure, raw capture](https://github.com/raspberrypi/picamera2/tree/main/examples)

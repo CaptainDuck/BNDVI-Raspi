@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import band_tag, health_bar, stat, kv, signed %}
+{% block title %}Photo {{ r.id }} — Hylocropter{% endblock %}
+
+{% block content %}
+<a class="btn btn-ghost hc-noprint" style="margin-bottom:10px"
+   href="{{ url_for('page_map', flight=r.flight_id) if r.flight_id else url_for('page_history') }}">
+  &larr; Back to the map</a>
+
+<div class="row" style="margin-bottom:18px">
+  <div class="grow">
+    <h2 style="margin:2px 0">
+      {%- if r.files_purged %}This photo's file was deleted
+      {%- else %}Photo from {{ r.timestamp[11:16] }}{% endif -%}
+    </h2>
+    <p class="page-sub">
+      {{ r.timestamp|replace('T', ', ') }}
+      {%- if r.geo %} · {{ '%.5f'|format(r.geo.lat) }}° N,
+        {{ '%.5f'|format(r.geo.lon) }}° E
+        {%- if r.geo.rel_alt_m %} · {{ r.geo.rel_alt_m }} m up{% endif %}
+      {%- else %} · no GPS position{% endif %}
+      {%- if flight %} · {{ flight.name }}{% endif %}
+    </p>
+  </div>
+  {{ band_tag(r.classification, 'style="font-size:14px;padding:7px 16px"') }}
+  <button class="btn btn-secondary hc-noprint" onclick="window.print()">Save as PDF</button>
+</div>
+
+<div class="card elev-sm" style="background:var(--color-accent-2-100);margin-bottom:16px">
+  <div style="font-size:16px;line-height:1.5">{{ summary.plain }}</div>
+  {% if r.exposure_check and r.exposure_check.level != 'ok' %}
+    <div style="font-size:14px;color:var(--color-accent-800)">
+      ⚠ {{ r.exposure_check.text }}</div>
+  {% endif %}
+</div>
+
+{% if r.files_purged %}
+  <div class="card elev-sm empty">
+    <div class="empty-mark warn"></div>
+    <h3 style="margin:0">The photos were deleted to free up space</h3>
+    <p>The measurements below were kept, so this capture still counts towards the
+      flight's numbers and the farm map.</p>
+  </div>
+{% else %}
+  <div class="grid grid-figs">
+    <figure class="card elev-sm" style="padding:var(--space-2)">
+      <div style="border-radius:18px;overflow:hidden">
+        <img src="{{ url_for('captures_file', filename=r.files.falsecolor) }}"
+             alt="False-colour stress view">
+      </div>
+      <figcaption>Stress view — green is doing well, red needs a look</figcaption>
+    </figure>
+    <figure class="card elev-sm" style="padding:var(--space-2)">
+      <div style="border-radius:18px;overflow:hidden">
+        <img src="{{ url_for('captures_file', filename=r.files.heatmap) }}"
+             alt="BNDVI heatmap with colour scale">
+      </div>
+      <figcaption>Detailed heatmap</figcaption>
+    </figure>
+    <figure class="card elev-sm" style="padding:var(--space-2)">
+      <div style="border-radius:18px;overflow:hidden">
+        <img src="{{ url_for('captures_file', filename=r.files.raw) }}"
+             alt="Raw Infrablue capture">
+      </div>
+      <figcaption>The photo as the camera saw it — healthy plants look pink</figcaption>
+    </figure>
+  </div>
+{% endif %}
+
+<div class="hc-noprint" style="margin-top:20px">
+  <details class="card elev-sm" style="padding:var(--space-3)">
+    <summary style="cursor:pointer;font-family:var(--font-heading);font-size:17px">
+      Technical details</summary>
+    <div class="grid grid-cards" style="margin-top:14px">
+      <div class="card elev-sm">
+        <span class="card-kicker">Statistics</span>
+        <div class="stats">
+          {{ stat('Mean', signed(r.stats.mean, 4)) }}
+          {{ stat('Median', signed(r.stats.median, 4)) }}
+          {{ stat('Min', signed(r.stats.min, 4)) }}
+          {{ stat('Max', signed(r.stats.max, 4)) }}
+          {{ stat('Std dev', '%.4f'|format(r.stats.std)) }}
+        </div>
+        {{ health_bar(r.stats) }}
+        <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+          Healthy above {{ '%.2f'|format(r.settings.threshold_healthy|default(0.3)) }} ·
+          stressed below {{ '%.2f'|format(r.settings.threshold_moderate|default(0.1)) }}
+        </div>
+      </div>
+
+      <div class="card elev-sm">
+        <span class="card-kicker">Capture settings</span>
+        <div class="kv">
+          {{ kv('Resolution', (r.settings.resolution[0] ~ ' × ' ~ r.settings.resolution[1] ~ ' px') if r.settings.resolution else '—') }}
+          {{ kv('Exposure', (r.settings.exposure_us ~ ' µs') if r.settings.exposure_us else '—') }}
+          {{ kv('Analogue gain', '%.1f'|format(r.settings.gain) if r.settings.gain else '—') }}
+          {{ kv('AWB / AE', 'locked' if r.settings.awb_locked else ('synthetic' if r.settings.dev_mode else '—')) }}
+          {{ kv('NIR correction', ('on (k = %.2f)'|format(r.settings.nir_leak_coef))
+                if r.settings.correct_nir_leakage else 'off') }}
+          {{ kv('Format', r.settings.capture_format|default('rgb888')) }}
+          {{ kv('Mode', 'synthetic (dev)' if r.settings.dev_mode else 'camera') }}
+          {{ kv('Filter', 'Rosco #2007') }}
+          {% if r.process_ms %}{{ kv('Processing time', r.process_ms ~ ' ms') }}{% endif %}
+        </div>
+      </div>
+
+      {% if r.channels %}
+        <div class="card elev-sm">
+          <span class="card-kicker">Channel means</span>
+          <div class="card-title" style="margin-bottom:4px">R = NIR · B = visible blue + leak</div>
+          <div class="stats">
+            {{ stat('NIR (R)', '%.1f'|format(r.channels.nir)) }}
+            {{ stat('Green', '%.1f'|format(r.channels.green)) }}
+            {{ stat('Blue', '%.1f'|format(r.channels.blue)) }}
+            {{ stat('R peak', '%.0f'|format(r.channels.nir_max)) }}
+            {{ stat('B peak', '%.0f'|format(r.channels.blue_max)) }}
+          </div>
+          <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+            A white reference should peak at 180–230 in both R and B — bright but
+            not clipped.
+          </div>
+        </div>
+      {% endif %}
+
+      {% if r.geo %}
+        <div class="card elev-sm">
+          <span class="card-kicker">Position</span>
+          <div class="kv">
+            {{ kv('Latitude', '%.6f'|format(r.geo.lat)) }}
+            {{ kv('Longitude', '%.6f'|format(r.geo.lon)) }}
+            {{ kv('Altitude (MSL)', (r.geo.alt_m ~ ' m') if r.geo.alt_m else '—') }}
+            {{ kv('Height above launch', (r.geo.rel_alt_m ~ ' m') if r.geo.rel_alt_m else '—') }}
+            {{ kv('Heading', (r.geo.heading_deg ~ '°') if r.geo.heading_deg else '—') }}
+            {{ kv('Satellites', r.geo.satellites|default('—')) }}
+            {{ kv('Trigger', r.trigger|default('manual')) }}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </details>
+</div>
+
+<div class="card elev-sm hc-noprint" style="margin-top:16px">
+  <span class="card-kicker">Label and notes</span>
+  <form id="meta-form" data-id="{{ r.id }}" class="grid" style="grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+    <div class="field">
+      <label for="cap-label">Label</label>
+      <input class="input" id="cap-label" name="label" value="{{ r.label or '' }}"
+             placeholder="e.g. north trellis, row 4">
+    </div>
+    <div class="field">
+      <label for="cap-notes">Notes</label>
+      <input class="input" id="cap-notes" name="notes" value="{{ r.notes or '' }}"
+             placeholder="what you saw on the ground">
+    </div>
+    <button class="btn btn-primary" type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card elev-sm hc-noprint" style="margin-top:16px;border:1px solid var(--color-accent-300)">
+  <span class="card-kicker">Danger zone</span>
+  <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+    Deleting removes this capture's photos and its measurements. If it belongs to
+    a flight, the flight's numbers will no longer include it.
+  </div>
+  <button class="btn btn-secondary btn-danger" id="delete-capture" data-id="{{ r.id }}"
+          style="align-self:flex-start">Delete this capture</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/capture.js') }}"></script>
+{% endblock %}

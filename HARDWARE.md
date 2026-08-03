@@ -1,6 +1,6 @@
-# Hardware Setup
+# Hardware Setup — Hylocropter
 
-How to physically build the BNDVI rig — what parts you need, how to
+How to physically build the Hylocropter imaging rig — what parts you need, how to
 mount the bundled blue filter on the Pi NoIR v2 camera, and how to
 verify it's mounted correctly.
 
@@ -68,8 +68,12 @@ This is what the [Raspberry Pi blog suggests](https://www.raspberrypi.com/news/w
 3. Drop it in. The cap holds it against the lens when snapped back on.
 
 **Pros**: zero adhesive, fully reversible, takes 30 seconds.
-**Cons**: gel is loose; if the cap pops off, the gel falls out. Tape
-the cap to the module if you'll be moving the rig around.
+**Cons**: gel is loose; if the cap pops off, the gel falls out.
+
+> ⚠️ **On the drone this is not enough on its own.** An F450 vibrates hard
+> enough to walk the cap off in flight, and you will not notice until you
+> look at the photos afterwards. Tape the cap to the module (Method 2) or
+> print a holder (Method 3) before anything leaves the ground.
 
 ### Method 2 — Tape at the edges (most secure non-permanent)
 
@@ -122,11 +126,11 @@ permanently. Skip unless the other methods genuinely don't work.
 Once mounted, take a daylight capture of vegetation:
 
 ```bash
-cd bndvi_dashboard
+cd hylocropter
 python bndvi.py
 ```
 
-Open the raw JPEG in `bndvi_output/`. You should see:
+Open the raw JPEG in `hylocropter_data/ground/`. You should see:
 
 - **Pinkish/magenta vegetation** (healthy plants reflect NIR, which lands
   in the red channel) — this is the key sanity check
@@ -144,5 +148,11 @@ and red light is leaking in from the sides.
 ## After mounting: calibrate
 
 Mounting the gel is step 1. The optical settings (gain, exposure, AWB
-lock) still need to be tuned for your lighting. See
-[CALIBRATION.md](./CALIBRATION.md) for that walkthrough.
+lock) still need tuning for your lighting, and the NIR-leakage coefficient
+needs measuring against a white card. Both are now done from the
+dashboard's **Debug** view rather than a text editor — see
+[CALIBRATION.md](./CALIBRATION.md).
+
+Also add the airframe parts from the bill of materials in
+[README.md](./README.md), and work through the bench checklist in
+[DEPLOYMENT.md](./DEPLOYMENT.md) before flying.

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Working on the photos — Hylocropter{% endblock %}
+
+{% block content %}
+<div class="proc-wrap">
+  <div class="card elev-md proc-card" id="proc-root">
+    <div class="proc-ring">
+      {# A conic-gradient ring with a surface-coloured hole: a progress dial with
+         no SVG and no library. #}
+      <div class="proc-ring-fill" id="proc-ring"
+           style="background:conic-gradient(var(--color-accent) 0turn, var(--color-neutral-200) 0)"></div>
+      <div class="proc-ring-hole"></div>
+      <div class="proc-pct" id="proc-pct">0%</div>
+    </div>
+
+    <div>
+      <h3 style="margin:0 0 4px" id="proc-title">Working on the photos</h3>
+      <p style="margin:0;font-size:14.5px;line-height:1.5;color:color-mix(in srgb, var(--color-text) 62%, transparent)"
+         id="proc-body">
+        The drone has landed and the photos are on the Pi. Everything happens here
+        on the device, so no internet is needed.
+      </p>
+    </div>
+
+    <div class="proc-steps" id="proc-steps">
+      {% for label in ['Copying photos off the camera',
+                       'Working out plant stress for each photo',
+                       'Placing them on the farm map',
+                       'Saving the flight'] %}
+        <div class="proc-step is-waiting" data-stage="{{ loop.index0 }}">
+          <span class="proc-step-mark"></span>
+          <span class="proc-step-label">{{ label }}</span>
+          <span class="proc-step-note">waiting</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 52%, transparent)"
+         id="proc-footer">You can leave this page open.</div>
+
+    <a class="btn btn-secondary" href="{{ url_for('page_map') }}" id="proc-skip">
+      Go to the farm map</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+  const ring = document.getElementById('proc-ring');
+  const pctEl = document.getElementById('proc-pct');
+  const titleEl = document.getElementById('proc-title');
+  const bodyEl = document.getElementById('proc-body');
+  const footerEl = document.getElementById('proc-footer');
+
+  function paint(p) {
+    const pct = Math.min(100, Math.round(p.percent || 0));
+    pctEl.textContent = pct + '%';
+    ring.style.background = 'conic-gradient(var(--color-accent) ' +
+      (pct / 100).toFixed(3) + 'turn, var(--color-neutral-200) 0)';
+
+    HC.$$('.proc-step').forEach(function (step) {
+      const stage = parseInt(step.dataset.stage, 10);
+      const done = p.stage > stage || pct >= 100;
+      const active = p.stage === stage && pct < 100;
+      step.classList.toggle('is-done', done);
+      step.classList.toggle('is-active', active);
+      step.classList.toggle('is-waiting', !done && !active);
+      HC.$('.proc-step-mark', step).textContent = done ? '✓' : (active ? '•' : '');
+      HC.$('.proc-step-note', step).textContent = done ? 'done'
+        : (active ? 'working…' : 'waiting');
+    });
+
+    if (p.total) {
+      footerEl.textContent = p.done + ' of ' + p.total +
+        ' photos processed · you can leave this page open';
+    }
+
+    if (!p.running && pct >= 100) {
+      titleEl.textContent = 'All done';
+      bodyEl.textContent = 'Opening the farm map.';
+      setTimeout(function () {
+        window.location.href = p.flight_id ? '/?flight=' + p.flight_id : '/';
+      }, 700);
+      return false;
+    }
+    if (!p.running && pct === 0) {
+      // Landed here with nothing to do — e.g. a direct visit or a page reload
+      // after processing already finished.
+      titleEl.textContent = 'Nothing to process';
+      bodyEl.textContent = 'No flight is waiting to be worked on.';
+      HC.$$('.proc-step').forEach(function (s) { s.hidden = true; });
+      footerEl.textContent = '';
+      return false;
+    }
+    return true;
+  }
+
+  HC.poll(function () {
+    return HC.api('/api/processing').then(paint);
+  }, 700, { runHidden: true });
+}());
+</script>
+{% endblock %}

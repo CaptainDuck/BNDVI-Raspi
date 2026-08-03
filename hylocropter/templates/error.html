@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — Hylocropter{% endblock %}
+{% block content %}
+<div class="card elev-sm empty">
+  <div class="empty-mark warn"></div>
+  <h3 style="margin:0">{{ code }}</h3>
+  <p>{{ message }}</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px">
+    <a class="btn btn-primary" href="{{ url_for('page_map') }}">Back to the farm map</a>
+    {# The device log is on the Debug page, which is where you'd look next
+       without a terminal. #}
+    <a class="btn btn-secondary" href="{{ url_for('page_debug') }}">Open the device log</a>
+  </div>
+</div>
+{% endblock %}

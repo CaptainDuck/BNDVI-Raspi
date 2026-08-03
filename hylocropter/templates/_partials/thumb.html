@@ -1,0 +1,16 @@
+{# One capture thumbnail. Expects `c` in scope. #}
+{% from "_partials/macros.html" import band_tag %}
+<a class="card elev-sm thumb-card" href="{{ url_for('page_capture', capture_id=c.id) }}">
+  <div class="thumb-frame">
+    {% if c.files and c.files.thumb %}
+      <img src="{{ url_for('captures_file', filename=c.files.thumb) }}"
+           alt="False-colour stress view for capture {{ c.id }}" loading="lazy">
+    {% endif %}
+    {{ band_tag(c.classification if not c.files_purged else 'failed') }}
+  </div>
+  <div class="thumb-time">
+    {{ c.timestamp[11:16] }}
+    {%- if c.geo %} · GPS{% endif %}
+    {%- if c.label %} · {{ c.label }}{% endif %}
+  </div>
+</a>

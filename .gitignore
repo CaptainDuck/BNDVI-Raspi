@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hylocropter runtime state — captures, flights, settings, logs.
+# Regenerated on first run; never useful in git.
+hylocropter/hylocropter_data/

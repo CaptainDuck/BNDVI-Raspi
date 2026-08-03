@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import band_tag, health_bar, stat, signed, dot %}
+{% block title %}Farm map — Hylocropter{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+{% endblock %}
+
+{% block content %}
+{% if not flight %}
+  {# First boot: nothing flown yet. Send them to Debug, because testing the
+     camera is genuinely the right first step. #}
+  <div class="card elev-sm empty">
+    <div class="empty-mark"></div>
+    <h3 style="margin:0">Nothing has been flown yet</h3>
+    <p>After the first flight, the farm map will fill in with colour showing
+      which plants are doing well and which need a look.</p>
+    <a class="btn btn-primary" href="{{ url_for('page_debug') }}">Test the camera first</a>
+  </div>
+
+  {% if ground_captures %}
+    <h3 class="section-h">Ground captures</h3>
+    <p class="page-sub" style="margin-bottom:12px">Photos taken without a flight —
+      including anything brought forward from the old dashboard.</p>
+    <div class="grid grid-thumbs">
+      {% for c in ground_captures %}
+        {% include "_partials/thumb.html" %}
+      {% endfor %}
+    </div>
+  {% endif %}
+
+{% else %}
+  <div class="row hc-noprint" style="margin-bottom:16px">
+    <div class="grow">
+      <h2 style="margin:0 0 2px">{{ flight.name }}</h2>
+      <p class="page-sub">
+        Flown {{ flight.started_at|replace('T', ', ') }}
+        {%- if flight.duration_s and flight.duration_s >= 60 %}
+          · {{ (flight.duration_s // 60) }} min
+        {%- elif flight.duration_s %} · under a minute{% endif %}
+        {%- if flight.capture_count %} · {{ flight.capture_count }} photos{% endif %}
+      </p>
+    </div>
+    <button class="btn btn-secondary" onclick="window.print()">Save as PDF</button>
+    <a class="btn btn-primary" href="{{ url_for('page_new_flight') }}">New flight</a>
+  </div>
+
+  {% if flights|length > 1 %}
+    <div class="pill-row hc-noprint">
+      {% for f in flights[:5] %}
+        <a class="pill {{ 'is-active' if f.id == flight.id }}"
+           href="{{ url_for('page_map', flight=f.id) }}">
+          {{ dot(f.classification) }}{{ f.name }} · {{ f.started_at[5:10] }}
+        </a>
+      {% endfor %}
+      <a class="pill is-dashed" href="{{ url_for('page_history') }}">
+        All {{ flights|length }} flights →
+      </a>
+    </div>
+  {% endif %}
+
+  <div class="card elev-sm map-card">
+    <div class="map-frame">
+      <div id="plot-map"
+           data-flight='{{ flight|tojson }}'
+           data-coverage='{{ coverage|tojson }}'
+           data-plot='{{ {"lat": cfg.plot_lat, "lon": cfg.plot_lon,
+                          "box_m": cfg.plot_box_m}|tojson }}'></div>
+      <div class="map-overlay-panel map-legend hc-noprint">
+        <span class="map-legend-title">Plant stress</span>
+        {% set s = flight.stats or {} %}
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-healthy)"></span>
+          <span>Doing well</span>
+          <span class="legend-share">{{ '%.0f'|format(s.healthy_pct or 0) }}%</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-moderate)"></span>
+          <span>Keep an eye</span>
+          <span class="legend-share">{{ '%.0f'|format(s.moderate_pct or 0) }}%</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-stressed)"></span>
+          <span>Needs a look</span>
+          <span class="legend-share">{{ '%.0f'|format(s.stressed_pct or 0) }}%</span>
+        </div>
+      </div>
+      <div class="map-overlay-panel map-modes hc-noprint" role="group" aria-label="Overlay style">
+        <button class="map-mode is-active" data-mode="smooth">Smooth</button>
+        <button class="map-mode" data-mode="bands">Three colours</button>
+      </div>
+    </div>
+    <div class="map-hint" id="map-hint">
+      Move over the field to check one spot. Pinch or scroll to zoom.
+    </div>
+  </div>
+
+  <div class="grid grid-cards" style="margin-top:16px">
+    {% if summary %}
+      <div class="card elev-sm" style="background:var(--color-accent-2-100)">
+        <span class="card-kicker" style="color:var(--color-accent-2-800)">What to do</span>
+        <div style="font-family:var(--font-heading);font-size:23px;line-height:1.2">
+          {{ summary.headline }}</div>
+        <div style="font-size:15px;line-height:1.5">{{ summary.plain }}</div>
+        <div style="font-size:14px;color:var(--color-accent-2-800)">{{ summary.advice }}</div>
+      </div>
+    {% endif %}
+
+    <div class="card elev-sm">
+      <span class="card-kicker">Compared with last time</span>
+      {% set diff = (flight.stats.mean - previous.stats.mean)
+                    if (previous and flight.stats) else none %}
+      <div style="display:flex;align-items:baseline;gap:9px">
+        <span class="delta-arrow" style="color:{{
+          'var(--stress-healthy)' if diff and diff > 0.02
+          else ('var(--stress-stressed)' if diff and diff < -0.02
+          else 'var(--color-neutral-700)') }}">{{
+          '↑' if diff and diff > 0.02 else ('↓' if diff and diff < -0.02 else '→') }}</span>
+        <span style="font-size:15px;line-height:1.35">{% if not previous %}This is
+          the first flight on record.{% elif diff > 0.02 %}Better than the flight
+          before — more of the block is reading healthy.{% elif diff < -0.02 %}Worse
+          than the flight before — more weak spots than last time.{% else %}About the
+          same as the flight before.{% endif %}</span>
+      </div>
+      {% if trend %}
+        <div class="trend">
+          {% for f in trend %}
+            <div class="trend-col">
+              <div class="trend-bar" style="height:{{ 14 + (f.stats.mean * 100)|round|int }}px;
+                background:{{ 'var(--color-accent)' if f.id == flight.id else
+                  ('var(--stress-healthy-dot)' if f.classification == 'healthy' else
+                   ('var(--stress-moderate)' if f.classification == 'moderate'
+                    else 'var(--stress-stressed)')) }}"
+                title="{{ f.name }}: {{ signed(f.stats.mean) }}"></div>
+              <span class="trend-label">{{ f.started_at[5:10] }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if captures %}
+    <h3 class="section-h">Photos from this flight</h3>
+    <div class="grid grid-thumbs">
+      {% for c in captures %}
+        {% include "_partials/thumb.html" %}
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="hc-noprint" style="margin-top:24px">
+    <details class="card elev-sm" style="padding:var(--space-3)">
+      <summary style="cursor:pointer;font-family:var(--font-heading);font-size:17px">
+        Technical — BNDVI</summary>
+      <div style="margin-top:12px">
+        <div class="stats">
+          {{ stat('Mean BNDVI', signed(flight.stats.mean) if flight.stats else '—') }}
+          {{ stat('Healthy', '%.1f%%'|format(flight.stats.healthy_pct) if flight.stats else '—') }}
+          {{ stat('Moderate', '%.1f%%'|format(flight.stats.moderate_pct) if flight.stats else '—') }}
+          {{ stat('Stressed', '%.1f%%'|format(flight.stats.stressed_pct) if flight.stats else '—') }}
+          {{ stat('Captures', flight.capture_count) }}
+          {{ stat('Altitude', (flight.altitude_m ~ ' m') if flight.altitude_m else '—') }}
+          {{ stat('Grid cells', (flight.grid.covered ~ '/' ~ (flight.grid.cols * flight.grid.rows)) if flight.grid else '—') }}
+        </div>
+        <div style="font-size:12.5px;margin-top:10px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+          Bands: healthy above {{ '%.2f'|format(flight.thresholds.healthy) }},
+          stressed below {{ '%.2f'|format(flight.thresholds.moderate) }}.
+          NIR-leakage correction {{ 'on (k = %.2f)'|format(cfg.nir_leak_coef)
+            if cfg.correct_nir_leakage else 'off' }}.
+          {% if not flight.bounds %}
+            <br><strong>No GPS on these photos</strong>, so they could not be placed
+            on the map — the overlay shows the plot outline only.
+          {% endif %}
+        </div>
+      </div>
+    </details>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/colormap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+{% endblock %}

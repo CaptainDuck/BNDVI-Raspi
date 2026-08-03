@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import kv %}
+{% block title %}Settings — Hylocropter{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="settings-page" id="settings-root"
+     data-settings='{{ cfg|tojson }}'
+     data-coverage='{{ coverage|tojson }}'
+     data-plan='{{ tile_plan|tojson }}'>
+  <h2 style="margin:0 0 2px">Settings</h2>
+  <p class="page-sub" style="margin-bottom:22px">
+    These are the values the drone uses on its next flight.
+  </p>
+
+  {# ── camera ────────────────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Camera</span>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px">
+      <div class="field">
+        <label for="s-exposure">Exposure (µs)</label>
+        <input class="input" type="number" id="s-exposure" data-setting="exposure_us"
+               min="500" max="200000" step="100" value="{{ cfg.exposure_us }}">
+      </div>
+      <div class="field">
+        <label for="s-gain">Analogue gain</label>
+        <input class="input" type="number" id="s-gain" data-setting="gain"
+               min="1" max="16" step="0.1" value="{{ cfg.gain }}">
+      </div>
+      <div class="field">
+        <label for="s-k">NIR-leakage k</label>
+        <input class="input" type="number" id="s-k" data-setting="nir_leak_coef"
+               min="0" max="2" step="0.05" value="{{ cfg.nir_leak_coef }}">
+      </div>
+      <div class="field">
+        <label for="s-warmup">Warm-up (s)</label>
+        <input class="input" type="number" id="s-warmup" data-setting="warmup_s"
+               min="0" max="10" step="0.5" value="{{ cfg.warmup_s }}">
+      </div>
+      <div class="field">
+        <label>Resolution</label>
+        <div class="seg" style="width:100%">
+          {% for w, h in resolutions %}
+            <label class="seg-opt" style="flex:1">
+              <input type="radio" name="s-resolution" data-setting="resolution"
+                     value="{{ w }}x{{ h }}" {{ 'checked' if cfg.resolution == [w, h] }}>{{ w }}p
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="field">
+        <label>Capture format</label>
+        <div class="seg" style="width:100%">
+          <label class="seg-opt" style="flex:1">
+            <input type="radio" name="s-format" data-setting="capture_format"
+                   value="rgb888" {{ 'checked' if cfg.capture_format == 'rgb888' }}>JPEG
+          </label>
+          <label class="seg-opt" style="flex:1">
+            <input type="radio" name="s-format" data-setting="capture_format"
+                   value="raw_dng" {{ 'checked' if cfg.capture_format == 'raw_dng' }}>+ raw DNG
+          </label>
+        </div>
+      </div>
+    </div>
+    <label class="radio" style="margin-top:4px">
+      <input type="checkbox" data-setting="correct_nir_leakage"
+             {{ 'checked' if cfg.correct_nir_leakage }}><span class="dot"></span>
+      Apply NIR-leakage correction
+    </label>
+    <label class="radio">
+      <input type="checkbox" data-setting="save_array"
+             {{ 'checked' if cfg.save_array }}><span class="dot"></span>
+      Keep the raw BNDVI array with each photo (needed for the farm map)
+    </label>
+    <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+      Auto white balance and auto exposure stay locked during flight so captures
+      stay comparable. JPEG is gamma-encoded, so the raw DNG is the honest input
+      for calibration work — at the cost of about 10 MB per photo.
+    </div>
+  </div>
+
+  {# ── thresholds ────────────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Stress thresholds</span>
+    <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+      Where the colours change on every map and heatmap. Photos keep the
+      thresholds they were taken with, so changing these does not rewrite history.
+    </div>
+    <div class="control-head" style="margin-top:4px">
+      <span>Doing well above</span>
+      <span class="val" id="th-label">{{ '%.2f'|format(cfg.threshold_healthy) }}</span>
+    </div>
+    <input type="range" id="s-t-healthy" data-setting="threshold_healthy"
+           min="0.15" max="0.7" step="0.01" value="{{ cfg.threshold_healthy }}"
+           style="accent-color:var(--stress-healthy)">
+    <div class="control-head">
+      <span>Stressed below</span>
+      <span class="val" id="tm-label">{{ '%.2f'|format(cfg.threshold_moderate) }}</span>
+    </div>
+    <input type="range" id="s-t-moderate" data-setting="threshold_moderate"
+           min="-0.2" max="0.3" step="0.01" value="{{ cfg.threshold_moderate }}"
+           style="accent-color:var(--stress-stressed)">
+    <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+      These defaults are generic vegetation values, not derived for dragon fruit.
+      See RESEARCH-GAPS.md §5 for how to measure your own from ground truth.
+    </div>
+  </div>
+
+  {# ── offline map ───────────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Offline map</span>
+    <div class="card-title">How far the map is downloaded</div>
+
+    {% if coverage.has_tiles %}
+      <div class="kv">
+        {{ kv('Area covered', coverage.extent_label or '—') }}
+        {{ kv('Detail', coverage.detail_label or '—') }}
+        {{ kv('Tiles on disk', coverage.tiles) }}
+        {{ kv('Size', coverage.size_label) }}
+        {{ kv('Downloaded', coverage.downloaded_at or '—') }}
+        {{ kv('Source', coverage.source) }}
+        {{ kv('Complete', 'yes' if coverage.complete else 'some tiles are missing') }}
+      </div>
+      <div class="zoom-table" style="margin-top:2px">
+        {% for z, n in coverage.per_zoom.items() %}
+          <span class="tag tag-neutral" style="margin-right:4px">zoom {{ z }}: {{ n }}</span>
+        {% endfor %}
+      </div>
+      <div id="coverage-map" style="margin-top:10px"></div>
+      <div class="text-muted" style="font-size:12px">
+        Solid line: the downloaded area. Dashed: your plot.
+      </div>
+    {% else %}
+      <div class="card" style="background:var(--color-accent-100);gap:6px">
+        <strong style="font-family:var(--font-heading)">No offline map yet</strong>
+        <span style="font-size:13.5px">The farm map will show blank sand-coloured
+          ground until satellite imagery is downloaded. Do this once, on a machine
+          or a Wi-Fi network with internet — after that the Pi never needs the
+          network again.</span>
+      </div>
+    {% endif %}
+
+    <div class="hr"></div>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+      <div class="field">
+        <label for="s-lat">Plot latitude</label>
+        <input class="input" type="number" id="s-lat" step="0.00001" value="{{ cfg.plot_lat }}">
+      </div>
+      <div class="field">
+        <label for="s-lon">Plot longitude</label>
+        <input class="input" type="number" id="s-lon" step="0.00001" value="{{ cfg.plot_lon }}">
+      </div>
+      <div class="field">
+        <label for="s-box">Box size (m)</label>
+        <input class="input" type="number" id="s-box" step="10" min="100" max="4000"
+               value="{{ cfg.plot_box_m }}">
+      </div>
+      <div class="field">
+        <label for="s-zmax">Maximum zoom</label>
+        <input class="input" type="number" id="s-zmax" min="14" max="19"
+               value="{{ cfg.tile_zoom_max }}">
+      </div>
+    </div>
+    <div id="plan-summary" style="font-size:13.5px;padding:8px 0">
+      {{ tile_plan.tiles }} tiles · about {{ (tile_plan.est_bytes / 1048576)|round(1) }} MB ·
+      {{ tile_plan.area_ha }} ha
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="tile-download">Download the map</button>
+      <button class="btn btn-secondary" id="tile-cancel" hidden>Stop</button>
+    </div>
+    <div class="progress-track" id="tile-progress-track" hidden>
+      <div class="progress-fill" id="tile-progress-fill"></div>
+    </div>
+    <div id="tile-status" style="font-size:13px"></div>
+  </div>
+
+  {# ── flight controller ─────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Flight controller</span>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div class="field">
+        <label for="s-mav">MAVLink connection</label>
+        <input class="input" id="s-mav" data-setting="mavlink_connection"
+               value="{{ cfg.mavlink_connection }}">
+      </div>
+      <div class="field">
+        <label for="s-baud">Baud rate</label>
+        <input class="input" type="number" id="s-baud" data-setting="mavlink_baud"
+               value="{{ cfg.mavlink_baud }}">
+      </div>
+      <div class="field">
+        <label for="s-trigdist">Photo every (m)</label>
+        <input class="input" type="number" id="s-trigdist" data-setting="trigger_distance_m"
+               min="1" max="200" value="{{ cfg.trigger_distance_m }}">
+      </div>
+    </div>
+    <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+      <code>/dev/ttyAMA0</code> for the Pixhawk over serial.
+      Use <code>udp:127.0.0.1:14550</code> to test against ArduPilot SITL with no
+      hardware attached — worth doing before you trust this in the air
+      (RESEARCH-GAPS.md §7). Status now: <strong>{{ telemetry.detail }}</strong>.
+    </div>
+  </div>
+
+  {# ── device actions ────────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Run the device</span>
+    <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+      Everything you'd otherwise type into a terminal.
+    </div>
+    <div class="action-grid">
+      {% for key, spec in actions.items() %}
+        <button class="btn btn-secondary {{ 'btn-danger' if spec.danger }}"
+                data-action="{{ key }}">{{ spec.label }}</button>
+      {% endfor %}
+    </div>
+    <div class="toast" id="action-result" hidden></div>
+  </div>
+
+  {# ── activity ──────────────────────────────────────────────────────────── #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">Recent activity</span>
+    <div id="activity-list"><div class="text-muted" style="font-size:13px">Loading…</div></div>
+  </div>
+
+  {# ── device info ───────────────────────────────────────────────────────── #}
+  <div class="card elev-sm">
+    <span class="card-kicker">Device</span>
+    <div class="kv">
+      {% for item in device_info %}{{ kv(item.label, item.value) }}{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}

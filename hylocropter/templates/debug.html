@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import stat %}
+{% block title %}Debug — Hylocropter{% endblock %}
+
+{% block content %}
+<div id="debug-root" data-settings='{{ cfg|tojson }}'>
+
+  <div class="row" style="margin-bottom:20px">
+    <div class="grow">
+      <h2 style="margin:0 0 2px">Debug view</h2>
+      <p class="page-sub">Live off the NoIR camera. Change a setting and watch
+        every output react.</p>
+    </div>
+    {% if camera.available or camera.synthetic %}
+      <button class="btn btn-secondary" id="toggle-live">Freeze frame</button>
+      <button class="btn btn-primary" id="save-frame">Save as capture</button>
+    {% endif %}
+  </div>
+
+  {% if not camera.available and not camera.synthetic %}
+    {# The mockup's "No camera detected" state. Reachable when picamera2 sees no
+       module — a bad ribbon cable is by far the most common cause. #}
+    <div class="card elev-sm empty">
+      <div class="empty-mark warn"></div>
+      <h3 style="margin:0">No camera detected</h3>
+      <p>The Pi can't see the NoIR module. Check the ribbon cable is seated the
+        right way round, then retry. You can keep working with synthetic frames
+        meanwhile.</p>
+      <p class="text-muted" style="font-size:12.5px">{{ camera.detail }}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px">
+        <button class="btn btn-primary" id="retry-camera">Retry detection</button>
+        <button class="btn btn-secondary" id="use-synthetic">Use synthetic frames</button>
+      </div>
+    </div>
+  {% else %}
+
+  <div class="debug-grid">
+    <div class="debug-main">
+
+      <div class="debug-feeds">
+        <figure class="card elev-sm" style="padding:var(--space-2)">
+          <div class="canvas-frame">
+            <canvas id="dbg-raw" width="400" height="300"></canvas>
+            {# The drag layer sits over the raw feed: you pick the white
+               reference on the picture that shows it. #}
+            <div class="roi-layer" id="roi-layer">
+              <div class="roi-box" id="roi-box" hidden></div>
+              <div class="roi-hint">Drag a box over a white card to calibrate</div>
+            </div>
+            <span class="tag" id="feed-label">LIVE</span>
+          </div>
+          <figcaption>Raw NoIR feed — healthy plants should look pink</figcaption>
+        </figure>
+        <figure class="card elev-sm" style="padding:var(--space-2)">
+          <div class="canvas-frame"><canvas id="dbg-heat" width="400" height="300"></canvas></div>
+          <figcaption>BNDVI heatmap</figcaption>
+        </figure>
+        <figure class="card elev-sm" style="padding:var(--space-2)">
+          <div class="canvas-frame"><canvas id="dbg-fc" width="400" height="300"></canvas></div>
+          <figcaption>False colour, at your thresholds</figcaption>
+        </figure>
+        <figure class="card elev-sm" style="padding:var(--space-2)">
+          <div class="canvas-frame"><canvas id="dbg-hist" width="400" height="300"></canvas></div>
+          <figcaption>BNDVI histogram</figcaption>
+        </figure>
+      </div>
+
+      <div class="card elev-sm">
+        <span class="card-kicker">Channel split</span>
+        <div class="card-title" style="margin-bottom:4px">R = NIR · G = leak · B = visible blue</div>
+        <div class="channels">
+          <figure>
+            <div class="canvas-frame"><canvas id="ch-r" width="260" height="195"></canvas></div>
+            <figcaption>Red — NIR proxy</figcaption>
+          </figure>
+          <figure>
+            <div class="canvas-frame"><canvas id="ch-g" width="260" height="195"></canvas></div>
+            <figcaption>Green — mostly blocked</figcaption>
+          </figure>
+          <figure>
+            <div class="canvas-frame"><canvas id="ch-b" width="260" height="195"></canvas></div>
+            <figcaption>Blue — visible + NIR leak</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="card elev-sm">
+        <span class="card-kicker">Live readout</span>
+        <div class="stats">
+          {{ stat('Mean', '—', 'live-mean') }}
+          {{ stat('Healthy', '—', 'live-healthy') }}
+          {{ stat('Moderate', '—', 'live-moderate') }}
+          {{ stat('Stressed', '—', 'live-stressed') }}
+          {{ stat('Std dev', '—', 'live-std') }}
+          {{ stat('Range', '—', 'live-range') }}
+        </div>
+        <div style="font-size:13px;padding-top:4px;color:color-mix(in srgb, var(--color-text) 70%, transparent)"
+             id="sanity-note">Waiting for the first frame…</div>
+      </div>
+
+      <div class="card elev-sm">
+        <span class="card-kicker">Device log</span>
+        <div class="card-title">Everything the Pi has logged this session</div>
+        <div class="log-view" id="log-view"></div>
+      </div>
+    </div>
+
+    {# ── control column ──────────────────────────────────────────────────── #}
+    <div class="card elev-sm controls">
+      <span class="card-kicker">Controls</span>
+
+      <div class="control-group">
+        <div class="control-head">
+          <span>NIR-leakage correction</span>
+          <span class="val" id="nir-label">{{ 'On' if cfg.correct_nir_leakage else 'Off' }}</span>
+        </div>
+        <div class="toggle-pair">
+          <button class="btn btn-secondary {{ 'is-on' if not cfg.correct_nir_leakage }}"
+                  data-nir="off">Off</button>
+          <button class="btn btn-secondary {{ 'is-on' if cfg.correct_nir_leakage }}"
+                  data-nir="on">On</button>
+        </div>
+        <div class="control-sub">
+          <span>k coefficient</span>
+          <span class="val" id="k-label">{{ '%.2f'|format(cfg.nir_leak_coef) }}</span>
+        </div>
+        <input type="range" id="k" min="0" max="1.2" step="0.05" value="{{ cfg.nir_leak_coef }}"
+               aria-label="NIR leakage coefficient k">
+        <div class="control-note">Public Lab default 0.8 · usable 0.3–0.8 ·
+          <strong>unverified</strong>, prefer measuring it below</div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-head"><span>Calibrate from a white card</span></div>
+        <div class="control-note" style="margin-bottom:6px">
+          White reflects about equally in NIR and visible, so it should read
+          BNDVI 0. Drag a box over a white card in the raw feed and this solves
+          k = B/R − 1 directly.
+        </div>
+        <button class="btn btn-secondary btn-block" id="solve-k" disabled>
+          Solve k from the selection
+        </button>
+        <div class="control-note" id="solve-result"></div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-head">
+          <span>Exposure</span>
+          <span class="val" id="exposure-label">{{ cfg.exposure_us }} µs</span>
+        </div>
+        <input type="range" id="exposure" min="500" max="20000" step="100"
+               value="{{ cfg.exposure_us }}" aria-label="Exposure time">
+        <div class="control-head" style="margin-top:8px">
+          <span>Analogue gain</span>
+          <span class="val" id="gain-label">{{ '%.1f'|format(cfg.gain) }}×</span>
+        </div>
+        <input type="range" id="gain" min="1" max="8" step="0.1" value="{{ cfg.gain }}"
+               aria-label="Analogue gain">
+        <div class="control-note">AWB and auto-exposure stay locked. Aim for a
+          white card's brightest pixels at 180–230.</div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-head"><span>Threshold bands</span></div>
+        <div class="control-sub">
+          <span>Healthy above</span>
+          <span class="val" id="t-healthy-label">{{ '%.2f'|format(cfg.threshold_healthy) }}</span>
+        </div>
+        <input type="range" id="t-healthy" min="0.15" max="0.7" step="0.01"
+               value="{{ cfg.threshold_healthy }}" aria-label="Healthy threshold"
+               style="accent-color:var(--stress-healthy)">
+        <div class="control-sub" style="margin-top:6px">
+          <span>Stressed below</span>
+          <span class="val" id="t-moderate-label">{{ '%.2f'|format(cfg.threshold_moderate) }}</span>
+        </div>
+        <input type="range" id="t-moderate" min="-0.2" max="0.3" step="0.01"
+               value="{{ cfg.threshold_moderate }}" aria-label="Stressed threshold"
+               style="accent-color:var(--stress-stressed)">
+        <div class="control-note">Not derived for dragon fruit — see
+          RESEARCH-GAPS.md §5.</div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-head"><span>Resolution</span></div>
+        <div class="seg" style="width:100%">
+          {% for w, h in resolutions %}
+            <label class="seg-opt" style="flex:1">
+              <input type="radio" name="resolution" value="{{ w }}x{{ h }}"
+                     {{ 'checked' if cfg.resolution == [w, h] }}>{{ w }}p
+            </label>
+          {% endfor %}
+        </div>
+        <div class="control-head" style="margin-top:10px">
+          <span>Preview framerate</span>
+          <span class="val" id="fps-label">{{ cfg.preview_fps }} fps</span>
+        </div>
+        <input type="range" id="fps" min="1" max="24" step="1" value="{{ cfg.preview_fps }}"
+               aria-label="Preview framerate">
+      </div>
+
+      {% if camera.synthetic %}
+        <div class="control-group">
+          <div class="control-head"><span>Test scene</span></div>
+          <div class="scene-row">
+            {% for key, spec in scenes.items() %}
+              <button class="btn btn-secondary btn-sm {{ 'is-on' if cfg.preview_scene == key }}"
+                      data-scene="{{ key }}">{{ spec.label }}</button>
+            {% endfor %}
+          </div>
+          <div class="control-note">No camera attached, so frames are generated.
+            They model NIR leaking into blue, so the calibration above really works.</div>
+        </div>
+      {% endif %}
+
+      <button class="btn btn-secondary btn-block" id="reset-debug">Reset to defaults</button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/colormap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/debug.js') }}"></script>
+{% endblock %}

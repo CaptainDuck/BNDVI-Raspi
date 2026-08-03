@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import stat %}
+{% block title %}New flight — Hylocropter{% endblock %}
+
+{% block content %}
+<div style="max-width:780px" id="newflight-root" data-recording="{{ recording.id if recording else '' }}">
+  <a class="btn btn-ghost" href="{{ url_for('page_map') }}" style="margin-bottom:10px">
+    &larr; Back to the map</a>
+  <h2 style="margin:0 0 2px">New flight</h2>
+  <p class="page-sub" style="margin-bottom:20px">
+    You still fly the drone from Mission Planner. This page only gets the camera
+    ready and records the photos.
+  </p>
+
+  {% if not recording %}
+    {# ── step 1: pre-flight ─────────────────────────────────────────────── #}
+    <div class="card elev-sm" style="margin-bottom:16px">
+      <span class="card-kicker">Before take-off</span>
+      {% for c in checks %}
+        <div class="check-row">
+          <span class="check-mark {{ 'ok' if c.ok else 'bad' }}">{{ '✓' if c.ok else '!' }}</span>
+          <div style="margin-right:auto">
+            <div class="check-label">{{ c.label }}</div>
+            <div class="check-detail">{{ c.detail }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="card elev-sm" style="margin-bottom:16px">
+      <span class="card-kicker">Mission loaded on the drone</span>
+      <div class="stats">
+        {{ stat('Waypoints', telemetry.mission.count or '—') }}
+        {{ stat('Altitude', (telemetry.mission.altitude_m ~ ' m') if telemetry.mission.altitude_m else '—') }}
+        {{ stat('Line spacing', (telemetry.mission.line_spacing_m ~ ' m') if telemetry.mission.line_spacing_m else '—') }}
+        {{ stat('Est. photos', est_photos or '—') }}
+      </div>
+      <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
+        {% if telemetry.connected %}
+          Read off the flight controller over MAVLink, so it always matches what
+          you uploaded from Mission Planner.
+        {% else %}
+          Nothing to read — the flight controller isn't connected, so these stay
+          blank until it is.
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card elev-sm" style="margin-bottom:16px">
+      <span class="card-kicker">When to take a photo</span>
+      {% if cfg.trigger_source == 'mission' %}
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <span class="check-mark ok">✓</span>
+          <div>
+            <div style="font-size:15px">Whatever the mission says</div>
+            <div class="check-detail">
+              Your mission already says when to shoot, so there's nothing to set
+              here. Put <code>DO_SET_CAM_TRIGG_DIST</code> in the Mission Planner
+              mission (or set the <code>CAM_TRIGG_DIST</code> parameter). The
+              drone tells the camera each time, and every photo gets the drone's
+              own GPS position.
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-ghost" id="override-trigger" style="align-self:flex-start;margin-top:2px">
+          Set it here instead</button>
+      {% else %}
+        <div class="seg" style="width:100%;max-width:430px">
+          {% for mode, label in [('distance', 'Every ' ~ cfg.trigger_distance_m ~ ' m'),
+                                 ('waypoint', 'At each waypoint'),
+                                 ('interval', 'Every ' ~ cfg.trigger_interval_s ~ ' s')] %}
+            <label class="seg-opt" style="flex:1">
+              <input type="radio" name="trigger" value="{{ mode }}"
+                     {{ 'checked' if cfg.trigger_mode == mode }}>{{ label }}
+            </label>
+          {% endfor %}
+        </div>
+        <div style="font-size:13px;margin-top:8px;color:color-mix(in srgb, var(--color-text) 62%, transparent)"
+             id="trigger-note"></div>
+        <button class="btn btn-ghost" id="use-mission-trigger" style="align-self:flex-start;margin-top:4px">
+          Go back to the mission setting</button>
+      {% endif %}
+    </div>
+
+    <button class="btn btn-primary btn-block" style="padding:13px" id="start-session">
+      Get the camera ready</button>
+    <p style="margin:10px 2px 0;font-size:12.5px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">
+      Nothing takes off from here. After this, arm and start the mission in
+      Mission Planner as you normally would — the dashboard never arms the
+      aircraft.
+    </p>
+
+  {% else %}
+    {# ── step 2: armed, recording ───────────────────────────────────────── #}
+    <div class="card elev-sm empty" style="margin-bottom:16px;padding:44px 26px">
+      <div class="empty-mark pulse-ring" style="width:64px;height:64px"></div>
+      <h3 style="margin:0" id="session-title">
+        {% if telemetry.armed %}Recording photos
+        {% else %}Camera is ready — start the mission in Mission Planner{% endif %}
+      </h3>
+      <p id="session-body">
+        {% if telemetry.armed %}
+          Leave this page open — it closes the flight by itself when the drone
+          disarms.
+        {% else %}
+          Arm the drone and switch to AUTO the way you always do. This page is
+          watching the flight controller and will start saving photos the moment
+          the mission begins.
+        {% endif %}
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px">
+        <button class="btn btn-primary" id="finish-session">Mission finished</button>
+        <button class="btn btn-secondary" id="cancel-session">Cancel</button>
+      </div>
+      <p class="text-muted" style="font-size:12.5px;margin:0">
+        The flight closes automatically on disarm. Use "Mission finished" if the
+        link dropped and it didn't.
+      </p>
+    </div>
+
+    <div class="card elev-sm">
+      <span class="card-kicker">Live from the drone</span>
+      <div class="kv" id="session-telemetry">
+        <div class="kv-row"><span>Flight mode</span><span id="tel-mode">—</span></div>
+        <div class="kv-row"><span>Waypoint</span><span id="tel-wp">—</span></div>
+        <div class="kv-row"><span>Altitude</span><span id="tel-alt">—</span></div>
+        <div class="kv-row"><span>Photos saved</span><span id="tel-photos">{{ recording.capture_count }}</span></div>
+        <div class="kv-row"><span>GPS</span><span id="tel-gps">—</span></div>
+        <div class="kv-row"><span>Trigger</span><span>{{
+          'From the mission' if cfg.trigger_source == 'mission'
+          else cfg.trigger_mode ~ ' (set here)' }}</span></div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/newflight.js') }}"></script>
+{% endblock %}

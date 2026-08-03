@@ -2,3 +2,4 @@ Flask>=3.0,<4.0
 numpy>=1.24
 matplotlib>=3.7
 Pillow>=10.0
+pymavlink>=2.4.37
