@@ -63,6 +63,14 @@ def deg2tile(lat, lon, z):
     return max(0, min(n - 1, x)), max(0, min(n - 1, y))
 
 
+def tile2deg(x, y, z):
+    """North-west corner of tile (x, y) at zoom z, as (lat, lon)."""
+    n = 2 ** z
+    lon = x / n * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+    return lat, lon
+
+
 def metres_per_pixel(lat, z):
     return 156543.03392 * math.cos(math.radians(lat)) / (2 ** z)
 
@@ -103,9 +111,20 @@ def plan(lat, lon, box_m, zoom_min, zoom_max):
         per_zoom[str(z)] = count
         ranges[z] = (x0, x1, y0, y1)
         total += count
+    # Tiles sit on a fixed grid, so any box snaps outward to whole tiles and you
+    # end up with more ground than you asked for. Report that separately — the
+    # difference is what the coverage inset draws, and it is real: it's imagery
+    # you have and can fly over.
+    top = ranges[zoom_max]
+    nw_lat, nw_lon = tile2deg(top[0], top[2], zoom_max)
+    se_lat, se_lon = tile2deg(top[1] + 1, top[3] + 1, zoom_max)
+    tile_bounds = {"south": se_lat, "west": nw_lon, "north": nw_lat, "east": se_lon}
+
     return {
         "centre": [round(lat, 6), round(lon, 6)],
         "bounds": bounds,
+        "tile_bounds": tile_bounds,
+        "tile_area_ha": bounds_area_ha(tile_bounds),
         "box_m": int(box_m),
         "area_ha": bounds_area_ha(bounds),
         "zooms": list(range(zoom_min, zoom_max + 1)),
@@ -264,6 +283,8 @@ class TileDownloader:
         manifest = {
             "centre": job["centre"],
             "bounds": job["bounds"],
+            "tile_bounds": job["tile_bounds"],
+            "tile_area_ha": job["tile_area_ha"],
             "box_m": job["box_m"],
             "area_ha": job["area_ha"],
             "zooms": job["zooms"],
@@ -324,6 +345,8 @@ def coverage(tiles_dir):
         "per_zoom": per_zoom,
         "zooms": sorted(zooms),
         "bounds": None,
+        "tile_bounds": None,
+        "tile_area_ha": None,
         "box_m": None,
         "area_ha": None,
         "centre": None,
@@ -338,8 +361,9 @@ def coverage(tiles_dir):
             m = json.loads(manifest_path.read_text())
         except (json.JSONDecodeError, OSError):
             m = {}
-        for key in ("bounds", "box_m", "area_ha", "centre", "downloaded_at",
-                    "source", "attribution", "complete"):
+        for key in ("bounds", "tile_bounds", "tile_area_ha", "box_m", "area_ha",
+                    "centre", "downloaded_at", "source", "attribution",
+                    "complete"):
             if key in m:
                 result[key] = m[key]
 
@@ -347,6 +371,10 @@ def coverage(tiles_dir):
         span = result["box_m"]
         result["extent_label"] = (
             f"{span} m × {span} m · {result['area_ha']} ha")
+        if result["tile_area_ha"]:
+            result["actual_label"] = (
+                f"{result['tile_area_ha']} ha of imagery on disk "
+                f"(tiles snap outward to a whole-tile grid)")
         best = max(result["zooms"])
         lat = result["centre"][0] if result["centre"] else 0.0
         result["detail_label"] = (

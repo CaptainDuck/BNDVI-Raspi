@@ -194,14 +194,23 @@
      Answers "how far is the map downloaded?" visually: the solid rectangle is
      what is on disk, the dashed one is the plot. */
   const mapHost = document.getElementById('coverage-map');
-  if (mapHost && window.L && coverage.bounds) {
-    const c = coverage.bounds;
+  if (mapHost && window.L && (coverage.tile_bounds || coverage.bounds)) {
+    // Fit to what is genuinely on disk. Fitting the requested box instead would
+    // hide the margin the tile grid gives you for free.
+    const c = coverage.tile_bounds || coverage.bounds;
     const box = [[c.south, c.west], [c.north, c.east]];
     const map = L.map(mapHost, {
       zoomControl: false, attributionControl: false,
       scrollWheelZoom: false, dragging: false, doubleClickZoom: false
     });
-    L.tileLayer('/tiles/{z}/{x}/{y}.jpg', { minZoom: 14, maxZoom: 19 }).addTo(map);
+    // Same reason as the farm map: bound the *native* zoom range to what is
+    // actually on disk, or this inset asks for a level we never downloaded and
+    // renders as blank ground.
+    const zooms = (coverage.zooms && coverage.zooms.length) ? coverage.zooms : [16, 19];
+    L.tileLayer('/tiles/{z}/{x}/{y}.jpg', {
+      minZoom: Math.min(12, zooms[0]), maxZoom: 21,
+      minNativeZoom: zooms[0], maxNativeZoom: zooms[zooms.length - 1]
+    }).addTo(map);
     map.fitBounds(box, { padding: [10, 10] });
     L.rectangle(box, { color: '#8c491a', weight: 2, fill: false }).addTo(map);
 

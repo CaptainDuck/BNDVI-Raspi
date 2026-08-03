@@ -116,11 +116,13 @@
 
     {% if coverage.has_tiles %}
       <div class="kv">
-        {{ kv('Area covered', coverage.extent_label or '—') }}
+        {{ kv('Plot you asked for', coverage.extent_label or '—') }}
+        {{ kv('Imagery actually on disk',
+              (coverage.tile_area_ha ~ ' ha') if coverage.tile_area_ha else '—') }}
         {{ kv('Detail', coverage.detail_label or '—') }}
-        {{ kv('Tiles on disk', coverage.tiles) }}
+        {{ kv('Tiles', coverage.tiles) }}
         {{ kv('Size', coverage.size_label) }}
-        {{ kv('Downloaded', coverage.downloaded_at or '—') }}
+        {{ kv('Downloaded', coverage.downloaded_at|replace('T', ' ') if coverage.downloaded_at else '—') }}
         {{ kv('Source', coverage.source) }}
         {{ kv('Complete', 'yes' if coverage.complete else 'some tiles are missing') }}
       </div>
@@ -131,7 +133,11 @@
       </div>
       <div id="coverage-map" style="margin-top:10px"></div>
       <div class="text-muted" style="font-size:12px">
-        Solid line: the downloaded area. Dashed: your plot.
+        Solid line: how far the map goes at full detail. Dashed: the plot you
+        asked for. Tiles snap outward to a whole-tile grid, so you get a little
+        more ground than requested — useful when the drone drifts past the
+        boundary. Zoomed out you'll see further still, because the lower zoom
+        levels use bigger tiles.
       </div>
     {% else %}
       <div class="card" style="background:var(--color-accent-100);gap:6px">

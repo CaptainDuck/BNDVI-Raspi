@@ -36,9 +36,17 @@
     attributionControl: true, scrollWheelZoom: false
   });
 
+  /* minNativeZoom / maxNativeZoom matter here. Only the zoom levels in the
+     manifest exist on disk, so without these Leaflet asks for a level we never
+     downloaded and gets the blank fallback — the map looks broken when it isn't.
+     Bounding the *native* range instead lets Leaflet scale the tiles we do have,
+     so zooming past either end degrades to softer imagery rather than nothing. */
+  const zooms = (coverage.zooms && coverage.zooms.length) ? coverage.zooms : [16, 19];
   L.tileLayer('/tiles/{z}/{x}/{y}.jpg', {
-    minZoom: 14,
-    maxZoom: 19,
+    minZoom: Math.min(12, zooms[0]),
+    maxZoom: 21,
+    minNativeZoom: zooms[0],
+    maxNativeZoom: zooms[zooms.length - 1],
     attribution: coverage.attribution || 'Imagery © Esri'
   }).addTo(map);
 
@@ -51,14 +59,16 @@
 
   /* How far the offline map extends. The user asked to see this: without it a
      blank patch is indistinguishable from ground that is genuinely bare. */
-  if (coverage.has_tiles && coverage.bounds) {
-    const c = coverage.bounds;
+  if (coverage.has_tiles && (coverage.tile_bounds || coverage.bounds)) {
+    const c = coverage.tile_bounds || coverage.bounds;
     L.rectangle([[c.south, c.west], [c.north, c.east]], {
       color: '#8c491a', weight: 1.5, dashArray: '2 6', fill: false,
       interactive: false
     }).addTo(map).bindTooltip(
-      'Edge of the downloaded map — ' + (coverage.extent_label || '') +
-      ', ' + coverage.size_label,
+      'Edge of the downloaded map — ' +
+      (coverage.tile_area_ha ? coverage.tile_area_ha + ' ha' : '') +
+      ' of imagery, ' + coverage.size_label +
+      '. Beyond this line the map is blank.',
       { sticky: true });
   }
 

@@ -9,6 +9,13 @@
     "north": 14.129284764642472,
     "east": 121.0796716041439
   },
+  "tile_bounds": {
+    "south": 14.123258234950852,
+    "west": 121.07345581054688,
+    "north": 14.129917040618174,
+    "east": 121.080322265625
+  },
+  "tile_area_ha": 54.9,
   "box_m": 620,
   "area_ha": 38.4,
   "zooms": [
@@ -26,7 +33,7 @@
   "tiles": 138,
   "failed": 0,
   "bytes": 1940984,
-  "downloaded_at": "2026-08-03T13:00:10",
+  "downloaded_at": "2026-08-03T13:10:40",
   "source": "Esri World Imagery",
   "attribution": "Imagery \u00a9 Esri",
   "complete": true
