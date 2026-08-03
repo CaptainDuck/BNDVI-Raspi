@@ -369,3 +369,137 @@
   .map-legend { position: static; background: transparent; box-shadow: none; }
   a[href]::after { content: ""; }
 }
+
+/* ── guided setup ───────────────────────────────────────────────────────── */
+
+/* A reading-width column, centred — this page is more document than dashboard. */
+.setup { max-width: 880px; margin: 0 auto; }
+.setup-step { gap: var(--space-3); margin-bottom: 18px; }
+.setup-step p { font-size: 14.5px; line-height: 1.55; }
+.setup-step ul { padding-left: 20px; }
+.setup-step li { margin-bottom: 4px; }
+
+/* progress rail: horizontal on desktop, scrolls on a phone */
+.setup-rail {
+  list-style: none; margin: 0 0 18px; padding: 0 0 6px;
+  display: flex; flex-wrap: wrap; gap: 4px; scrollbar-width: none;
+}
+/* On a phone there is no room to wrap ten chips, so scroll instead. */
+@media (max-width: 700px) {
+  .setup-rail { flex-wrap: nowrap; overflow-x: auto; }
+}
+.setup-rail::-webkit-scrollbar { display: none; }
+.setup-rail-item {
+  flex: none; display: flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 7px 12px; border-radius: 999px; font-size: 12.5px;
+  border: 1px solid var(--color-divider); background: var(--color-surface);
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+}
+.setup-rail-item:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.setup-rail-item.is-current {
+  border-color: var(--color-accent); color: var(--color-text);
+  background: var(--color-accent-100);
+}
+.setup-rail-dot {
+  width: 9px; height: 9px; flex: none; border-radius: 999px;
+  background: var(--color-neutral-400);
+}
+.setup-rail-item.is-ok .setup-rail-dot { background: var(--stress-healthy); }
+.setup-rail-item.is-warn .setup-rail-dot { background: var(--stress-moderate); }
+.setup-rail-item.is-bad .setup-rail-dot { background: var(--stress-stressed); }
+.setup-rail-item.is-skip .setup-rail-dot { background: var(--color-neutral-500); }
+
+/* verdict banner — the answer, not a question */
+.setup-verdict {
+  display: flex; gap: 10px; align-items: flex-start; font-size: 14px;
+  padding: 11px 14px; border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+}
+.setup-mark {
+  width: 21px; height: 21px; flex: none; border-radius: 999px; margin-top: 1px;
+  display: grid; place-items: center; font-size: 12px;
+  background: var(--color-neutral-200); color: var(--color-neutral-700);
+}
+.setup-verdict.is-ok { background: var(--color-accent-2-100); }
+.setup-verdict.is-ok .setup-mark {
+  background: var(--color-accent-2-200); color: var(--color-accent-2-800);
+}
+.setup-verdict.is-warn { background: #f9efd7; }
+.setup-verdict.is-warn .setup-mark { background: #f6e6c2; color: #7a5410; }
+.setup-verdict.is-bad { background: var(--color-accent-100); }
+.setup-verdict.is-bad .setup-mark {
+  background: var(--color-accent-200); color: var(--color-accent-800);
+}
+
+.setup-summary-ok { color: var(--stress-healthy); }
+.setup-summary-warn { color: #7a5410; }
+.setup-summary-bad { color: var(--stress-stressed); }
+.setup-summary-skip { color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+
+/* the "what the gel passes" table from step 1 */
+.setup-band-table { display: flex; flex-direction: column; gap: 2px; }
+.setup-band-table > div {
+  display: flex; align-items: center; gap: 10px; font-size: 13.5px;
+  padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+.setup-band-table > div > strong { min-width: 130px; font-weight: 600; }
+.setup-band-table > div > span:last-child {
+  margin-left: auto; color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.setup-swatch { width: 16px; height: 16px; border-radius: 5px; flex: none; }
+
+.setup-formula {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 13px; line-height: 1.6; padding: 11px 14px;
+  background: var(--color-neutral-100); border-radius: var(--radius-md);
+  overflow-x: auto; white-space: nowrap;
+}
+
+/* live feed + controls side by side, stacking on a phone */
+.setup-feed {
+  display: grid; gap: 14px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: start;
+}
+.setup-channels { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 520px) { .setup-channels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.setup-controls { display: flex; flex-direction: column; gap: 4px; }
+.setup-readout {
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+.setup-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* the 180–230 target meter */
+.setup-meter { margin-top: 10px; }
+.setup-meter-track {
+  position: relative; height: 12px; border-radius: 999px; overflow: hidden;
+  background: var(--color-neutral-200);
+}
+.setup-meter-target {
+  position: absolute; left: 70.6%; width: 19.6%; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--stress-healthy) 35%, transparent);
+}
+.setup-meter-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: var(--color-accent); transition: width .25s;
+}
+.setup-meter-scale {
+  display: flex; justify-content: space-between; font-size: 10.5px; margin-top: 3px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.setup-nav {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
+  padding: 12px 0; background: linear-gradient(to top,
+    var(--color-bg) 60%, transparent);
+}
+.setup-nav-label {
+  margin: 0 auto; font-size: 12.5px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+@media (max-width: 700px) {
+  .setup-feed { grid-template-columns: minmax(0, 1fr); }
+  .setup-band-table > div { flex-wrap: wrap; }
+  .setup-band-table > div > strong { min-width: 0; }
+}

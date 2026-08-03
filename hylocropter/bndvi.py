@@ -541,7 +541,7 @@ SYNTH_WHITE_LEVEL = 150.0
 
 
 def synthetic_field(scene="mixed", jitter=0.0, seed=None, white_ref=True):
-    """Generate the small (SYNTH_H, SYNTH_W) NIR and blue planes for a scene.
+    """Generate the small (SYNTH_H, SYNTH_W) NIR, green and blue planes.
 
     Returns the *observed* channels, i.e. blue already contains NIR leakage,
     exactly as the sensor would deliver them.
@@ -590,7 +590,14 @@ def synthetic_field(scene="mixed", jitter=0.0, seed=None, white_ref=True):
 
     # What the sensor actually sees in the blue channel.
     blue = vis + SYNTH_LEAK * nir
-    return nir.clip(0, 255), blue.clip(0, 255)
+    # Green: the gel passes 8-18% of it, and green pixels also pick up NIR, so a
+    # gel-fitted rig shows green well below blue. Modelling it means the setup
+    # wizard's "is the filter fitted?" check is exercisable without a camera.
+    green = 0.14 * (soil_vis + (110 - soil_vis) * cover) + SYNTH_LEAK * nir * 0.8
+    if white_ref:
+        x0, y0, x1, y1 = SYNTH_WHITE_BOX
+        green[y0:y1, x0:x1] = 0.14 * SYNTH_WHITE_LEVEL + SYNTH_LEAK * SYNTH_WHITE_LEVEL * 0.8
+    return nir.clip(0, 255), green.clip(0, 255), blue.clip(0, 255)
 
 
 def synthetic_frame(resolution=DEFAULT_RESOLUTION, scene="mixed", jitter=0.0,
@@ -600,8 +607,7 @@ def synthetic_frame(resolution=DEFAULT_RESOLUTION, scene="mixed", jitter=0.0,
     Renders small then upsamples -- generating 8 MP of per-pixel noise is
     pointlessly slow on a Pi and the result is only ever a stand-in.
     """
-    nir, blue = synthetic_field(scene, jitter, seed)
-    green = 0.28 * nir + 0.25 * blue          # mostly blocked by the gel
+    nir, green, blue = synthetic_field(scene, jitter, seed)
     small = np.stack([nir, green, blue], -1).clip(0, 255).astype(np.uint8)
 
     w, h = int(resolution[0]), int(resolution[1])
@@ -720,6 +726,82 @@ def channel_means(rgb_array):
         "nir_max": float(np.max(rgb_array[:, :, 0])),
         "blue_max": float(np.max(rgb_array[:, :, 2])),
     }
+
+
+def filter_sanity(nir_mean, green_mean, blue_mean):
+    """Work out whether the blue gel is actually in the optical path.
+
+    This is the single most common way to get meaningless numbers: the gel falls
+    out of the lens cap, or was never fitted, and nothing complains. The frame
+    still looks like a photo and BNDVI still produces a number.
+
+    The tell is the green channel. The gel passes only 8-18% of green (Rosco's
+    own data sheet) while passing 53% of blue and most NIR, so a gel-fitted rig
+    photographing foliage in daylight shows green well *below* both. Without the
+    gel, green is the brightest channel on foliage, and all three are broadly
+    comparable on a neutral scene.
+
+    Returns (verdict, message) where verdict is "fitted" | "missing" |
+    "uncertain". Deliberately conservative: an uncertain answer is more useful
+    than a confident wrong one, and the raw frame's colour is the fallback check.
+    """
+    if max(nir_mean, green_mean, blue_mean) < 12:
+        return "uncertain", ("The frame is too dark to tell. Point at something "
+                            "lit — ideally plants in daylight — and try again.")
+
+    green_ratio = green_mean / max(1.0, blue_mean)
+    nir_ratio = nir_mean / max(1.0, green_mean)
+
+    if green_mean >= nir_mean and green_mean >= blue_mean:
+        return "missing", (
+            "Green is the brightest channel, which is what an unfiltered camera "
+            "looks like. The blue gel is probably not in the light path — check "
+            "it hasn't fallen out of the lens cap.")
+    if green_ratio > 0.9:
+        return "missing", (
+            f"Green is {green_ratio * 100:.0f}% of blue. The gel should hold it "
+            f"well below that, so it looks like the filter is missing or only "
+            f"covering part of the lens.")
+    if nir_ratio > 1.6 and green_ratio < 0.75:
+        return "fitted", (
+            f"Looks right: green is held down to {green_ratio * 100:.0f}% of "
+            f"blue and NIR is {nir_ratio:.1f}x green, which is what the gel does.")
+    return "uncertain", (
+        f"Not conclusive — green is {green_ratio * 100:.0f}% of blue. Point at "
+        f"leafy plants in daylight for the clearest answer. The other check is "
+        f"the raw picture: with the gel on, vegetation looks pink.")
+
+
+def white_reference_check(nir_max, blue_max):
+    """Judge a white reference's exposure against CALIBRATION.md's 180-230 target.
+
+    Bright enough to use the sensor's range, not so bright that either channel
+    clips — a clipped channel makes BNDVI read falsely flat, and no amount of
+    later maths recovers it.
+    """
+    peak = max(nir_max, blue_max)
+    low = min(nir_max, blue_max)
+    if peak >= 253:
+        which = "NIR" if nir_max >= blue_max else "blue"
+        return "clipped", (
+            f"The {which} channel is clipping at {peak:.0f}. Lower the exposure "
+            f"or the gain until both peak below 240.")
+    if peak < 120:
+        return "dark", (
+            f"Too dark — the reference peaks at {peak:.0f}, and you want "
+            f"180-230. Raise the exposure or the gain.")
+    if peak < 170:
+        return "dim", (
+            f"A little dim at {peak:.0f}. Usable, but nudge the exposure up "
+            f"towards 180-230 to use more of the sensor's range.")
+    if low < 60:
+        return "unbalanced", (
+            f"One channel peaks at {peak:.0f} but the other only reaches "
+            f"{low:.0f}. That much imbalance on a white target usually means the "
+            f"light has very little NIR in it — shoot outdoors in daylight.")
+    return "good", (
+        f"Good — the reference peaks at {peak:.0f}, inside the 180-230 target "
+        f"and not clipping.")
 
 
 def exposure_warning(rgb_array):

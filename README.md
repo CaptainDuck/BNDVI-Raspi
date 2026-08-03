@@ -12,9 +12,16 @@ Group 8 · Dimayuga, Ilag, Virtucio · De La Salle Lipa · CpE Design and Practi
 
 ## How it works
 
-The Pi NoIR sensor has no IR-cut filter, so it sees both visible and NIR. The
-bundled Rosco #2007 ("Storaro Blue") gel passes blue and NIR while blocking red,
-so the channels stop meaning what their names say:
+> **The little blue square in your Pi NoIR box *is* the Rosco #2007.** Raspberry
+> Pi's own announcement says so: *"There's a little square of blue gel in there.
+> What's it for? … Our friend **Roscolux #2007 Storaro Blue** (that's the blue
+> thing's full name) … we buy it on giant reels and the guys at the factory in
+> Wales … cut it up into little squares for you to use."* Same object, two names —
+> nothing to buy.
+
+The Pi NoIR sensor has no IR-cut filter, so it sees both visible and NIR. That
+gel passes blue and NIR while blocking red, so the channels stop meaning what
+their names say:
 
 | Channel       | What it actually captures              |
 |---------------|----------------------------------------|
@@ -73,11 +80,12 @@ actually prescribes instead.
 
 ## The dashboard
 
-Seven views, all driveable from a phone on the Pi's hotspot. The design goal was
+Eight views, all driveable from a phone on the Pi's hotspot. The design goal was
 that you never need a terminal.
 
 | View | What it does |
 |---|---|
+| **Set up the camera** | Guided calibration walkthrough — see below |
 | **Farm map** | Satellite basemap with the flight's BNDVI overlay, a three-band legend, per-cell hover readout, plain-language summary, trend against previous flights, and the flight's photos |
 | **New flight** | Pre-flight checklist (camera, storage, MAVLink, GPS fix, mission), mission details read live off the Pixhawk, trigger source, then live telemetry while recording |
 | **Processing** | Post-landing progress: aggregate, map, save |
@@ -149,18 +157,33 @@ vendored into `hylocropter/static/`. The satellite basemap has to be downloaded
 once: **Settings → Offline map**, which shows the tile count and size before you
 commit and then reports exactly how far coverage extends.
 
-For a 620 m box (38 ha, comfortable around a 5–10 ha plot) at zoom 16–19 that's
-about 138 tiles / 2.4 MB. `static/tiles/` ships empty — see
-[RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §8.
+Imagery for the Tanauan plot is already downloaded and committed: **138 tiles,
+1.9 MB, zoom 16–19**, covering 54.9 ha at up to 29 cm per pixel. To move or resize
+it — once you've stood in the field and read the real coordinates — change the
+centre in Settings and download again.
 
 ## Calibration
 
-The defaults (gain 2.0, exposure 5000 µs, AWB/AE locked) are a reasonable start
-for direct daylight, but the numbers only mean something once tuned against a
-white reference in your actual light.
+**Start with the guided walkthrough: open the dashboard and go to “Set up the
+camera”.** Nine pages that explain what the blue filter does and then check each
+thing that needs calibrating against the live feed — including the two failures
+you cannot spot by eye:
 
-**[CALIBRATION.md](./CALIBRATION.md)** walks through it. All of it is now doable
-from the Debug view rather than a text editor.
+1. **How it works** — what the gel does, with Rosco's transmission numbers
+2. **Camera found** — is the ribbon cable seated
+3. **Filter fitted** — is the gel actually there? Measured off the green channel
+4. **Settings locked** — why the camera has to stop being clever
+5. **Exposure set** — drag a box on a white card, hit the 180–230 target
+6. **Leakage measured** — solves your own `k` from the same box
+7. **Bands chosen** — where green becomes yellow becomes red
+8. **Plant checked** — point at a healthy plant, confirm +0.3 to +0.7
+9. **Farm map** — offline imagery and the drone link
+
+It runs on synthetic frames too, so you can walk the whole flow before you're at
+the rig. Resumable, and re-runnable from Settings.
+
+**[CALIBRATION.md](./CALIBRATION.md)** is the same material in prose, for when you
+want the reasoning rather than the wizard. Nothing needs a text editor.
 
 ## Known gaps
 
@@ -196,9 +219,11 @@ real hardware.
     ├── tiles.py                  offline basemap prefetch + coverage
     ├── applog.py                 logging + the in-UI log buffer
     ├── app.py                    Flask routes
-    ├── templates/                Jinja, one file per view
+    ├── templates/                Jinja, one file per view (setup.html is the
+    │                               guided calibration walkthrough)
     ├── static/
-    │   ├── css/  js/             no build step, no framework
+    │   ├── css/                  tokens + layout, no framework
+    │   ├── js/                   feed.js is the shared live-feed engine
     │   ├── vendor/leaflet/       vendored for offline use
     │   ├── fonts/                Caprasimo + Figtree, local
     │   └── tiles/                offline basemap (download in Settings)

@@ -163,17 +163,27 @@
     };
   }
 
-  /** Wire a slider to a live label and a callback. */
+  /** Wire a slider to a live label and a callback.
+   *
+   * `onChange` fires only when the user actually moves it. The initial call
+   * paints the label and nothing else — firing onChange during wiring meant
+   * every page load immediately PATCHed the same settings straight back to the
+   * server, and any callback touching state built *after* the slider was wired
+   * would throw.
+   */
   function slider(input, label, format, onChange) {
     if (!input) return function () {};
-    function render() {
+    function paint() {
       const v = parseFloat(input.value);
       if (label) label.textContent = format ? format(v) : String(v);
-      if (onChange) onChange(v);
+      return v;
     }
-    input.addEventListener('input', render);
-    render();
-    return render;
+    input.addEventListener('input', function () {
+      const v = paint();
+      if (onChange) onChange(v);
+    });
+    paint();
+    return paint;
   }
 
   /** PATCH a settings key, debounced, with a toast on failure. */

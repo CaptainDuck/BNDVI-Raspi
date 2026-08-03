@@ -139,6 +139,15 @@ Fair. It's within Public Lab practice, and explicitly not calibration.
 
 ## 3. ✅ RESOLVED — Rosco #2007 spectral transmission
 
+**First: yes, the gel in the Pi NoIR box is this filter.** Raspberry Pi's
+[announcement](https://www.raspberrypi.com/news/whats-that-blue-thing-doing-here/)
+(29 Oct 2013): *"There's a little square of blue gel in there. What's it for? …
+Our friend **Roscolux #2007 Storaro Blue** (that's the blue thing's full name)
+turns out to be a great example — we buy it on giant reels and the guys at the
+factory in Wales where we make the Raspberry Pi and both kinds of camera board cut
+it up into little squares for you to use."* Chosen on Public Lab's research. So
+"the blue thing in the box" and "Rosco #2007" are the same object.
+
 Got the official data sheet:
 [us.rosco.com/en/products/filters/r2007-storaro-blue](https://us.rosco.com/en/products/filters/r2007-storaro-blue),
 chart at [2007.jpg](https://us.rosco.com/sites/default/files/content/filters//cinegel/2007.jpg).

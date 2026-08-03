@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+{% from "_partials/macros.html" import kv %}
+{% block title %}Set up the camera — Hylocropter{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+{% endblock %}
+
+{% block content %}
+{#
+  Guided setup. Each step explains *why* before asking for anything, then
+  measures the answer off the live feed instead of asking the operator to judge
+  it. The whole point is that nobody should need a terminal, or need to have read
+  CALIBRATION.md, to get trustworthy numbers out of this rig.
+#}
+<div class="setup" id="setup-root" data-settings='{{ cfg|tojson }}'>
+
+  <div class="row" style="margin-bottom:10px;align-items:flex-start">
+    <div class="grow">
+      <h2 style="margin:0 0 2px">Setting up the camera</h2>
+      <p class="page-sub">Nine short steps. Each one explains what it's for, then
+        checks it for you.</p>
+    </div>
+    <a class="btn btn-ghost" href="{{ url_for('page_map') }}">Leave setup</a>
+  </div>
+
+  <ol class="setup-rail" id="setup-rail" aria-label="Setup progress"></ol>
+
+  {# ═══ 1. what this rig is ═══════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="intro" data-title="How it works">
+    <span class="card-kicker">Step 1 of 9 · Background</span>
+    <h3 style="margin:0">What the blue gel is actually doing</h3>
+
+    <p>Your camera is a <strong>Pi NoIR</strong> — the same sensor as a normal Pi
+      camera, but with the infrared-blocking filter left out. So it sees visible
+      light <em>and</em> near-infrared, which your eyes can't.</p>
+
+    <p>That matters because of one fact about plants: <strong>healthy leaves
+      reflect near-infrared very strongly and absorb blue light.</strong> A
+      stressed or dying leaf reflects less NIR. So comparing "how much NIR" with
+      "how much blue" tells you something about plant health before you can see
+      anything wrong.</p>
+
+    <div class="card" style="background:var(--color-accent-2-100);gap:6px">
+      <strong style="font-family:var(--font-heading)">Yes — the blue square in
+        the box <em>is</em> the Rosco #2007</strong>
+      <span style="font-size:13.5px">Raspberry Pi's own announcement of it says:
+        “There's a little square of blue gel in there. What's it for? … Our friend
+        <strong>Roscolux #2007 Storaro Blue</strong> (that's the blue thing's full
+        name) turns out to be a great example — we buy it on giant reels and the
+        guys at the factory in Wales … cut it up into little squares for you to
+        use.” Same object, two names. You don't need to buy anything.</span>
+    </div>
+
+    <p>The gel's job is to get rid of red light. Here's what it lets through, from
+      Rosco's own data sheet:</p>
+
+    <div class="setup-band-table">
+      <div><span class="setup-swatch" style="background:#3b4fa8"></span>
+        <strong>Blue</strong> 420–440 nm<span>53% through</span></div>
+      <div><span class="setup-swatch" style="background:#4f7a3a"></span>
+        <strong>Green</strong> 500–560 nm<span>8–18% — mostly stopped</span></div>
+      <div><span class="setup-swatch" style="background:#8f2d20"></span>
+        <strong>Red</strong> 640–660 nm<span>2% — blocked</span></div>
+      <div><span class="setup-swatch" style="background:#5c5c5c"></span>
+        <strong>Near-infrared</strong> 700–740 nm<span>15% → 67% and rising</span></div>
+    </div>
+
+    <p>With red gone, the camera's three colour channels stop meaning what their
+      names say:</p>
+
+    <div class="kv">
+      {{ kv('The RED channel now holds', 'near-infrared — there is no red left for it to see') }}
+      {{ kv('The GREEN channel holds', 'very little — the gel stopped most of it, and we ignore it') }}
+      {{ kv('The BLUE channel holds', 'visible blue, plus a bit of leaked NIR') }}
+    </div>
+
+    <p style="margin-bottom:0">So the number this whole system is built on is just
+      a comparison of two of those channels:</p>
+    <div class="setup-formula">BNDVI = (NIR − Blue) ÷ (NIR + Blue)
+      &nbsp;=&nbsp; (Red channel − Blue channel) ÷ (Red channel + Blue channel)</div>
+    <p style="font-size:13.5px;margin-bottom:0" class="text-muted">It comes out
+      between −1 and +1. Higher means more NIR relative to blue, which means
+      healthier. That's the whole idea — everything after this is making sure the
+      camera measures those two channels honestly.</p>
+  </section>
+
+  {# ═══ 2. camera detected ════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="camera" data-title="Camera found">
+    <span class="card-kicker">Step 2 of 9 · Connection</span>
+    <h3 style="margin:0">Can the Pi see the camera?</h3>
+    <p>Everything else needs this first. The usual culprit is the ribbon cable:
+      it must be seated with the <strong>silver contacts facing the HDMI
+      port</strong>, and the latch pushed fully down at both ends.</p>
+
+    <div class="setup-verdict" id="v-camera"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Checking…</span></div>
+
+    <div class="setup-actions">
+      <button class="btn btn-secondary" id="setup-retry-camera">Check again</button>
+      <button class="btn btn-ghost" id="setup-use-synthetic">Carry on without a camera</button>
+    </div>
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:0">Without a
+      camera the dashboard generates test frames instead. Every step below still
+      works — useful for learning the flow before you're at the rig.</p>
+  </section>
+
+  {# ═══ 3. is the gel fitted ══════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="filter" data-title="Filter fitted">
+    <span class="card-kicker">Step 3 of 9 · The filter</span>
+    <h3 style="margin:0">Is the blue gel actually in front of the lens?</h3>
+    <p><strong>This is the single most common way to get meaningless
+      numbers.</strong> The gel sits loose inside the clear plastic lens cap, and
+      if the cap pops off it falls out — and nothing complains. The photos still
+      look like photos, and the dashboard still produces a number. It's just
+      wrong.</p>
+
+    <p><strong>Point the camera at leafy plants in daylight</strong>, then read the
+      verdict below. Two independent tells:</p>
+    <ul style="font-size:14px;margin-top:0">
+      <li><strong>The picture.</strong> With the gel on, vegetation looks
+        <em>pink or magenta</em> — that's NIR arriving in the red channel. Without
+        it, the picture looks like an ordinary photo.</li>
+      <li><strong>The green channel.</strong> The gel stops most green, so green
+        should be well below blue. Without the gel, green is the
+        <em>brightest</em> channel on foliage. That's what the check measures.</li>
+    </ul>
+
+    <div class="canvas-frame">
+      <canvas id="setup-raw" width="560" height="420"></canvas>
+      <span class="tag" id="setup-feed-label">LIVE</span>
+    </div>
+    <div class="setup-channels">
+      <figure><div class="canvas-frame"><canvas id="setup-ch-r" width="260" height="195"></canvas></div>
+        <figcaption>Red = NIR</figcaption></figure>
+      <figure><div class="canvas-frame"><canvas id="setup-ch-g" width="260" height="195"></canvas></div>
+        <figcaption>Green = should be dim</figcaption></figure>
+      <figure><div class="canvas-frame"><canvas id="setup-ch-b" width="260" height="195"></canvas></div>
+        <figcaption>Blue = visible blue</figcaption></figure>
+    </div>
+    <div class="setup-readout" id="setup-channel-readout">—</div>
+
+    <div class="setup-verdict" id="v-filter"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Point at plants in daylight…</span></div>
+    <div class="setup-actions">
+      <button class="btn btn-secondary" id="setup-check-filter">Check the filter</button>
+    </div>
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:0">Mounting it:
+      snap the clear lens cap off, cut the gel slightly smaller than the inside of
+      the cap, drop it in, snap the cap back on. On the drone, tape the cap down
+      too — an F450 vibrates hard enough to shake it loose. Never glue it to the
+      lens. Full detail in HARDWARE.md.</p>
+  </section>
+
+  {# ═══ 4. why locking matters ════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="locking" data-title="Settings locked">
+    <span class="card-kicker">Step 4 of 9 · Locking the camera</span>
+    <h3 style="margin:0">Why the camera has to stop being clever</h3>
+
+    <p>An ordinary camera constantly adjusts itself to make pictures look nice.
+      For this rig, every one of those adjustments is damage — because we are
+      measuring the <em>ratio</em> between two channels, and the camera adjusts
+      those channels <em>separately</em>.</p>
+
+    <div class="kv">
+      {{ kv('Auto white balance', 'Re-boosts red and blue independently to make white look white. It would cancel out the exact difference we are measuring.') }}
+      {{ kv('Auto exposure', 'Changes shutter and gain per shot, so two photos of the same plant are not comparable.') }}
+      {{ kv('Sharpening and denoise', 'Non-linear and uneven across the frame.') }}
+      {{ kv('Colour correction', 'Mixes the green channel into red and blue — the channel we said was blocked.') }}
+    </div>
+
+    <p>You don't have to configure any of that: it's already done, and the
+      dashboard <strong>checks it on every single frame</strong> by comparing what
+      the camera reports doing against what was asked. If a setting is being
+      silently ignored — which is a real bug in some versions — you'll see it
+      here rather than never finding out.</p>
+
+    <div class="setup-verdict" id="v-locking"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Checking…</span></div>
+
+    <div class="setup-readout" id="setup-lock-readout">—</div>
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:0">There is one
+      thing worth doing by hand later, on the rig: point at a fixed scene and
+      shade it with your hand. The picture should get darker while the BNDVI
+      <em>mean barely moves</em>. If the picture doesn't change at all, the lock
+      failed. Step 8 comes back to this.</p>
+  </section>
+
+  {# ═══ 5. exposure ═══════════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="exposure" data-title="Exposure set">
+    <span class="card-kicker">Step 5 of 9 · Exposure</span>
+    <h3 style="margin:0">Getting the brightness right</h3>
+
+    <p>Two knobs, and they're the only camera settings you'll normally touch:</p>
+    <div class="kv">
+      {{ kv('Exposure time', 'How long the shutter stays open. Longer = brighter, but more motion blur — which matters on a moving drone.') }}
+      {{ kv('Analogue gain', 'How much the signal is amplified. Higher = brighter, but noisier.') }}
+    </div>
+
+    <p><strong>What you're aiming for:</strong> put a sheet of plain white paper
+      in the shot, and adjust until its brightest pixels read
+      <strong>180–230</strong> out of 255. Bright enough to use the sensor's
+      range; not so bright that a channel hits 255 and clips. A clipped channel
+      makes BNDVI read falsely flat, and no maths afterwards can recover it.</p>
+
+    <p><strong>Drag a box over the white paper</strong> in the feed below, then
+      press Check. Adjust the sliders and re-check until it says good.</p>
+
+    <div class="setup-feed">
+      <div class="canvas-frame">
+        <canvas id="setup-exp-raw" width="400" height="300"></canvas>
+        <div class="roi-layer" id="setup-roi-layer">
+          <div class="roi-box" id="setup-roi-box" hidden></div>
+          <div class="roi-hint">Drag a box over the white paper</div>
+        </div>
+      </div>
+      <div class="setup-controls">
+        <div class="control-head"><span>Exposure</span>
+          <span class="val" id="setup-exposure-label">{{ cfg.exposure_us }} µs</span></div>
+        <input type="range" id="setup-exposure" min="500" max="20000" step="100"
+               value="{{ cfg.exposure_us }}" aria-label="Exposure time">
+        <div class="control-head" style="margin-top:8px"><span>Analogue gain</span>
+          <span class="val" id="setup-gain-label">{{ '%.1f'|format(cfg.gain) }}×</span></div>
+        <input type="range" id="setup-gain" min="1" max="8" step="0.1"
+               value="{{ cfg.gain }}" aria-label="Analogue gain">
+        <div class="setup-meter" title="White reference peak, target 180–230">
+          <div class="setup-meter-track">
+            <span class="setup-meter-target"></span>
+            <span class="setup-meter-fill" id="setup-meter-fill"></span>
+          </div>
+          <div class="setup-meter-scale"><span>0</span><span>180–230</span><span>255</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-verdict" id="v-exposure"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Drag a box over white paper, then check.</span></div>
+    <div class="setup-actions">
+      <button class="btn btn-primary" id="setup-check-exposure" disabled>Check the exposure</button>
+    </div>
+  </section>
+
+  {# ═══ 6. the k coefficient ══════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="leak" data-title="Leakage measured">
+    <span class="card-kicker">Step 6 of 9 · The leak</span>
+    <h3 style="margin:0">The blue channel is cheating, and we can measure by how much</h3>
+
+    <p>Look back at the transmission table in step 1. The gel passes blue —
+      but it passes near-infrared too, and the blue pixels on the sensor
+      can see NIR. So the "blue" channel is really
+      <em>blue + a bit of NIR</em>. That contamination makes plants look less
+      healthy than they are, because it inflates the number we subtract.</p>
+
+    <p>The fix is to subtract an estimate of it before computing the index:</p>
+    <div class="setup-formula">real blue ≈ blue channel − (k × NIR)</div>
+
+    <p>All of which comes down to: <strong>what is k for your camera?</strong>
+      And there's a neat trick. White paper reflects NIR and visible light about
+      equally, so a correctly corrected rig must read
+      <strong>BNDVI ≈ 0</strong> on white. Set the formula to give zero and it
+      rearranges to a single answer:</p>
+    <div class="setup-formula">k = (blue ÷ NIR) − 1</div>
+
+    <p>So the dashboard can just <em>measure</em> it off your white paper. Keep
+      the box from the last step over the paper and press the button.</p>
+
+    <div class="setup-verdict" id="v-leak"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Use the box from step 5, then solve.</span></div>
+    <div class="setup-actions">
+      <button class="btn btn-primary" id="setup-solve-k" disabled>Measure k from the white paper</button>
+      <button class="btn btn-ghost" id="setup-skip-k">Skip — leave the correction off</button>
+    </div>
+    <div class="setup-readout" id="setup-k-readout">—</div>
+
+    <div class="card" style="background:var(--color-accent-100);gap:4px;font-size:13px">
+      <strong style="font-family:var(--font-heading)">Don't trust the number 0.8</strong>
+      <span>You'll see 0.8 quoted for this everywhere, including in older versions
+        of this project's own notes. It's a real value from Public Lab — but for a
+        <em>different filter</em> (a narrowband red one, with the channels the
+        other way round). For the Rosco #2007, expect your measured k to come out
+        <strong>well below 0.8</strong>. Yours is better than theirs.</span>
+    </div>
+  </section>
+
+  {# ═══ 7. thresholds ════════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="thresholds" data-title="Bands chosen">
+    <span class="card-kicker">Step 7 of 9 · The three colours</span>
+    <h3 style="margin:0">Where green becomes yellow becomes red</h3>
+
+    <p>BNDVI is a continuous number, but the map shows three bands, because
+      "which rows do I walk today" is a three-way decision. These two values are
+      where the colours change.</p>
+
+    <div class="setup-feed">
+      <div class="canvas-frame"><canvas id="setup-fc" width="400" height="300"></canvas></div>
+      <div class="setup-controls">
+        <div class="control-head"><span>Doing well above</span>
+          <span class="val" id="setup-th-label">{{ '%.2f'|format(cfg.threshold_healthy) }}</span></div>
+        <input type="range" id="setup-t-healthy" min="0.15" max="0.7" step="0.01"
+               value="{{ cfg.threshold_healthy }}" style="accent-color:var(--stress-healthy)"
+               aria-label="Healthy threshold">
+        <div class="control-head"><span>Needs a look below</span>
+          <span class="val" id="setup-tm-label">{{ '%.2f'|format(cfg.threshold_moderate) }}</span></div>
+        <input type="range" id="setup-t-moderate" min="-0.2" max="0.3" step="0.01"
+               value="{{ cfg.threshold_moderate }}" style="accent-color:var(--stress-stressed)"
+               aria-label="Stressed threshold">
+        <div class="setup-readout" id="setup-band-readout">—</div>
+      </div>
+    </div>
+
+    <p>The defaults — <strong>0.30</strong> and <strong>0.10</strong> — match what
+      Public Lab practitioners report for this exact camera-and-gel combination
+      ("healthy plants 0.3 to 0.7, non-plants below 0.2"). They're a reasonable
+      place to start.</p>
+
+    <div class="card" style="background:var(--color-accent-2-100);gap:4px;font-size:13px">
+      <strong style="font-family:var(--font-heading)">These are not dragon fruit numbers yet</strong>
+      <span>Those thresholds come from leafy crops. <em>Hylocereus</em> is a cactus
+        with thick waxy cladodes and will not behave the same way. Deriving your
+        own is your Objective 4 validation, and it's straightforward: photograph
+        plants you've already judged by eye — clearly healthy, clearly cankered,
+        and some in between — read each mean off its detail page, and pick the
+        thresholds that best separate your groups. Every photo keeps the
+        thresholds it was taken with, so changing these later never rewrites
+        history.</span>
+    </div>
+
+    <div class="setup-verdict" id="v-thresholds"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Defaults are fine for now.</span></div>
+  </section>
+
+  {# ═══ 8. the honest test ════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="plant" data-title="Plant checked">
+    <span class="card-kicker">Step 8 of 9 · Does it work?</span>
+    <h3 style="margin:0">Point it at a plant you know is healthy</h3>
+
+    <p>This is the test that tells you the whole chain is right. Point the camera
+      at vegetation you'd describe as healthy, in daylight, and look at the mean:</p>
+
+    <div class="kv">
+      {{ kv('+0.3 to +0.7', 'What a healthy plant should read. You are done.') }}
+      {{ kv('Near zero or negative', 'Something upstream is wrong — most likely the gel, or the correction in step 6.') }}
+      {{ kv('Strongly negative', 'The channels have been swapped somewhere. That is a bug, not a calibration problem.') }}
+    </div>
+
+    <div class="setup-feed">
+      <div class="canvas-frame"><canvas id="setup-plant-heat" width="400" height="300"></canvas></div>
+      <div class="setup-controls">
+        <div class="stats" style="grid-template-columns:repeat(2,1fr)">
+          <div class="stat"><span class="stat-label">Mean BNDVI</span>
+            <span class="stat-value" id="setup-plant-mean">—</span></div>
+          <div class="stat"><span class="stat-label">Doing well</span>
+            <span class="stat-value" id="setup-plant-healthy">—</span></div>
+        </div>
+        <div class="setup-readout" id="setup-plant-readout">—</div>
+      </div>
+    </div>
+
+    <div class="setup-verdict" id="v-plant"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Point at a healthy plant, then check.</span></div>
+    <div class="setup-actions">
+      <button class="btn btn-primary" id="setup-check-plant">Check this reading</button>
+      <button class="btn btn-secondary" id="setup-save-frame">Save it as a capture</button>
+    </div>
+
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:0">Two things that
+      will ruin this test regardless of setup: <strong>indoor LED light</strong>
+      emits almost no NIR, and <strong>window glass blocks NIR</strong>. Go
+      outside.</p>
+  </section>
+
+  {# ═══ 9. the farm ══════════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="farm" data-title="Farm map">
+    <span class="card-kicker">Step 9 of 9 · The farm</span>
+    <h3 style="margin:0">Where the farm is, and the drone link</h3>
+
+    <p>The Pi has no internet in the field, so the satellite map has to be
+      downloaded once, ahead of time, for your plot only.</p>
+
+    <div class="kv">
+      {{ kv('Offline map', coverage.extent_label ~ ' · ' ~ coverage.size_label
+            if coverage.has_tiles else 'not downloaded yet') }}
+      {{ kv('Flight controller', telemetry.detail) }}
+    </div>
+
+    {% if not coverage.has_tiles %}
+      <p>Do this while the Pi is on a network with internet. It'll show you the
+        size before committing — for a 620 m box that's about 2.4 MB.</p>
+      <div class="setup-actions">
+        <a class="btn btn-primary" href="{{ url_for('page_settings') }}">Download the map in Settings</a>
+      </div>
+    {% else %}
+      <p>Already downloaded. If you move the plot centre later — for example once
+        you've stood in the field and read the real coordinates — re-download from
+        Settings.</p>
+      <div id="setup-map" style="height:200px;border-radius:18px;overflow:hidden"></div>
+    {% endif %}
+
+    <p style="font-size:13.5px">The drone side is optional for calibration. When
+      you're ready, plug the Pixhawk into the Pi's serial port; the dashboard
+      reads position and fires the camera when your Mission Planner mission tells
+      it to. It never arms the aircraft — Mission Planner flies, the Pi
+      photographs.</p>
+
+    <div class="setup-verdict" id="v-farm"><span class="setup-mark"></span>
+      <span class="setup-verdict-text">Optional — you can fly later.</span></div>
+  </section>
+
+  {# ═══ summary ═══════════════════════════════════════════════════════════ #}
+  <section class="card elev-sm setup-step" data-step="done" data-title="Done">
+    <span class="card-kicker">All done</span>
+    <h3 style="margin:0">Where you got to</h3>
+    <div id="setup-summary" class="kv"></div>
+    <p id="setup-summary-note" style="font-size:14px"></p>
+    <div class="setup-actions">
+      <a class="btn btn-primary" href="{{ url_for('page_debug') }}">Open the Debug view</a>
+      <a class="btn btn-secondary" href="{{ url_for('page_map') }}">Go to the farm map</a>
+      <button class="btn btn-ghost" id="setup-finish">Mark setup complete</button>
+    </div>
+    <p class="text-muted" style="font-size:12.5px;margin-bottom:0">You can run
+      this again any time from Settings. Nothing here is permanent — every value
+      is also a control in Debug or Settings.</p>
+  </section>
+
+  {# ═══ nav ═══════════════════════════════════════════════════════════════ #}
+  <div class="setup-nav hc-noprint">
+    <button class="btn btn-secondary" id="setup-prev">← Back</button>
+    <span class="setup-nav-label" id="setup-progress">Step 1 of 9</span>
+    <button class="btn btn-primary" id="setup-next">Next →</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/colormap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/feed.js') }}"></script>
+<script src="{{ url_for('static', filename='js/setup.js') }}"></script>
+{% endblock %}

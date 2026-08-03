@@ -114,10 +114,22 @@ the memory on a Pi 4.
 - **`applog.py`** — logging to a rotating file plus an in-memory ring the UI reads.
 - **`app.py`** — routes only. Keep it thin.
 
+Frontend modules worth knowing: **`static/js/feed.js`** is the shared live-feed
+engine (fetch, BNDVI, canvas painting, the drag-a-box region picker) used by both
+the Debug view and the setup wizard — don't duplicate it into a third place.
+**`templates/setup.html`** + **`static/js/setup.js`** are the guided calibration
+walkthrough; each step measures a verdict off the live feed rather than asking the
+operator to judge it, which is the whole reason it exists.
+
 ### The live debug feed
 
-The server sends **raw NIR and blue channel planes** (160×120, binary) from
+The server sends **raw NIR, green and blue channel planes** (160×120, binary) from
 `GET /api/preview/frame`. The browser derives BNDVI and paints all seven canvases.
+
+Green is sent even though the index ignores it: the channel-split panel claims to
+show a measured channel and must actually do so (it used to synthesise green from
+the other two, which was a lie), and `filter_sanity()` uses it to detect a gel
+that has fallen out of the lens cap.
 
 This is deliberate and worth preserving: the `k`, threshold and correction
 controls respond with **zero server round-trips**, and the four renders cannot

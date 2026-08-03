@@ -282,6 +282,13 @@ def page_debug():
                            resolutions=settings_mod.RESOLUTIONS, **_shell())
 
 
+@app.route("/setup")
+def page_setup():
+    return render_template("setup.html", view="setup", scenes=bndvi.SCENES,
+                           resolutions=settings_mod.RESOLUTIONS,
+                           tile_plan=_tile_plan(), **_shell())
+
+
 @app.route("/settings")
 def page_settings():
     return render_template("settings.html", view="settings",
@@ -557,17 +564,22 @@ def api_preview_frame():
     renders cannot drift out of sync: they all come from one array. The Pi only
     grabs, downsamples, and sends.
     """
-    nir, blue, meta, seq = cam.latest()
+    nir, green, blue, meta, seq = cam.latest()
     if nir is None:
         return _json_error(meta.get("error") or "no frame available", 503)
+    # Three planes, not two. Green is unused by the index but the channel-split
+    # panel claims to show a measured channel, and the setup wizard needs it to
+    # tell whether the blue gel is fitted at all.
     payload = np.concatenate([
         nir.clip(0, 255).astype(np.uint8).ravel(),
+        green.clip(0, 255).astype(np.uint8).ravel(),
         blue.clip(0, 255).astype(np.uint8).ravel(),
     ]).tobytes()
     resp = Response(payload, mimetype="application/octet-stream")
     resp.headers["X-Frame-Width"] = str(camera_mod.PREVIEW_W)
     resp.headers["X-Frame-Height"] = str(camera_mod.PREVIEW_H)
     resp.headers["X-Frame-Seq"] = str(seq)
+    resp.headers["X-Frame-Planes"] = "3"
     resp.headers["X-Frame-Source"] = meta.get("source", "unknown")
     # Locks the camera silently ignored, so the Debug view can say so.
     if meta.get("mismatches"):
@@ -610,6 +622,73 @@ def api_solve_k():
                              "reference", k)
     return jsonify({"k": k, "message": message, "applied": applied,
                     "region": region})
+
+
+@app.route("/api/diagnose/filter", methods=["POST"])
+def api_diagnose_filter():
+    """Is the blue gel actually in the light path?
+
+    The most common way to get meaningless numbers is a gel that fell out of the
+    lens cap, because nothing complains — the frame still looks like a photo. The
+    green channel gives it away; see bndvi.filter_sanity().
+    """
+    payload = request.get_json(silent=True) or {}
+    box = payload.get("box")
+    if box:
+        try:
+            region = cam.region_means(*[float(box[k]) for k in
+                                       ("x0", "y0", "x1", "y1")])
+        except (KeyError, TypeError, ValueError):
+            return _json_error("box needs x0, y0, x1, y1", 400)
+    else:
+        nir, green, blue, meta, _ = cam.latest()
+        if nir is None:
+            return _json_error(meta.get("error") or "no frame available", 503)
+        region = {"nir": float(nir.mean()), "green": float(green.mean()),
+                  "blue": float(blue.mean()), "source": meta.get("source")}
+    if region is None:
+        return _json_error("no live frame to measure", 503)
+    verdict, message = bndvi.filter_sanity(region["nir"], region["green"],
+                                          region["blue"])
+    return jsonify({"verdict": verdict, "message": message, "region": region})
+
+
+@app.route("/api/diagnose/white-reference", methods=["POST"])
+def api_diagnose_white():
+    """Judge a white card's exposure against the 180-230 target."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        box = [float(payload[key]) for key in ("x0", "y0", "x1", "y1")]
+    except (KeyError, TypeError, ValueError):
+        return _json_error("need x0, y0, x1, y1 as fractions of the frame", 400)
+    region = cam.region_means(*box)
+    if region is None:
+        return _json_error("no live frame to measure", 503)
+    verdict, message = bndvi.white_reference_check(region["nir_max"],
+                                                  region["blue_max"])
+    k, k_message = bndvi.solve_leak_coef(region["nir"], region["blue"])
+    return jsonify({"verdict": verdict, "message": message, "region": region,
+                    "k": k, "k_message": k_message})
+
+
+@app.route("/api/setup/state", methods=["GET", "POST"])
+def api_setup_state():
+    """Remember where the operator got to, so the wizard is resumable."""
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        patch = {}
+        if "step" in payload:
+            patch["setup_step"] = payload["step"]
+        if "completed" in payload:
+            patch["setup_completed"] = bool(payload["completed"])
+        if "done_steps" in payload:
+            patch["setup_done_steps"] = payload["done_steps"]
+        config.update(patch)
+        if patch.get("setup_completed"):
+            applog.activity(log, "Guided setup completed")
+    return jsonify({"step": config.get("setup_step"),
+                    "completed": config.get("setup_completed"),
+                    "done_steps": config.get("setup_done_steps")})
 
 
 # ── API: settings, logs, system ──────────────────────────────────────────────

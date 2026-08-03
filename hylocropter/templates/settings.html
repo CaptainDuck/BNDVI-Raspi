@@ -16,6 +16,17 @@
     These are the values the drone uses on its next flight.
   </p>
 
+  <div class="card elev-sm" style="margin-bottom:16px;background:var(--color-accent-2-100)">
+    <span class="card-kicker" style="color:var(--color-accent-2-800)">Guided setup</span>
+    <div class="card-title">Not sure what any of this does?</div>
+    <div style="font-size:13.5px">The walkthrough explains what the blue filter is
+      for, then checks each thing that needs calibrating against the live feed —
+      including the two failures you cannot see by eye.</div>
+    <a class="btn btn-primary" href="{{ url_for('page_setup') }}"
+       style="align-self:flex-start">{{ 'Run setup again' if cfg.setup_completed
+       else 'Start the walkthrough' }}</a>
+  </div>
+
   {# ── camera ────────────────────────────────────────────────────────────── #}
   <div class="card elev-sm" style="margin-bottom:16px">
     <span class="card-kicker">Camera</span>

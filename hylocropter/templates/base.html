@@ -70,6 +70,10 @@
          href="{{ url_for('page_debug') }}">Debug</a>
       <a class="tab {{ 'is-active' if view == 'settings' }}"
          href="{{ url_for('page_settings') }}">Settings</a>
+      {% if view == 'setup' or not cfg.setup_completed %}
+        <a class="tab {{ 'is-active' if view == 'setup' }}"
+           href="{{ url_for('page_setup') }}">Set up the camera</a>
+      {% endif %}
     </nav>
   </header>
 
@@ -80,6 +84,22 @@
         <div>
           <div class="banner-title">{{ banner.title }}</div>
           <div class="banner-body">{{ banner.body }}</div>
+        </div>
+      </div>
+    {% endif %}
+
+    {# First run: the calibration walkthrough is the single most useful place to
+       start, and it is not obvious from the farm map. #}
+    {% if not cfg.setup_completed and view not in ('setup', 'newflight') %}
+      <div class="banner hc-noprint" style="background:var(--color-accent-2-100);border-color:var(--color-accent-2-300)">
+        <span class="banner-mark" style="color:var(--color-accent-2-800)" aria-hidden="true">?</span>
+        <div>
+          <div class="banner-title">New here? Set the camera up first</div>
+          <div class="banner-body" style="color:var(--color-accent-2-800)">
+            Nine short steps that explain what the blue filter does and check that
+            your rig is measuring honestly.
+            <a href="{{ url_for('page_setup') }}">Start the walkthrough</a>.
+          </div>
         </div>
       </div>
     {% endif %}

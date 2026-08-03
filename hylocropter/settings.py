@@ -70,6 +70,11 @@ DEFAULTS = {
     "trigger_distance_m": 5,
     "trigger_interval_s": 2,
 
+    # ── guided setup ──────────────────────────────────────────────────────
+    "setup_completed": False,
+    "setup_step": 0,
+    "setup_done_steps": [],
+
     # ── offline map ───────────────────────────────────────────────────────
     "tile_zoom_min": 16,
     "tile_zoom_max": 19,
@@ -97,7 +102,8 @@ _LIMITS = {
 }
 
 _INTS = {"exposure_us", "preview_fps", "plot_box_m", "trigger_distance_m",
-         "trigger_interval_s", "mavlink_baud", "tile_zoom_min", "tile_zoom_max"}
+         "trigger_interval_s", "mavlink_baud", "tile_zoom_min", "tile_zoom_max",
+         "setup_step"}
 
 _lock = threading.Lock()
 
@@ -204,6 +210,8 @@ class Settings:
             return [float(raw[0]), float(raw[1])]
         if key == "blocks":
             return [str(b) for b in raw if str(b).strip()]
+        if key == "setup_done_steps":
+            return [str(b) for b in raw][:40]
         if isinstance(default, bool):
             if isinstance(raw, str):
                 return raw.strip().lower() in ("1", "true", "yes", "on")

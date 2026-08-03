@@ -75,7 +75,7 @@
           </figure>
           <figure>
             <div class="canvas-frame"><canvas id="ch-g" width="260" height="195"></canvas></div>
-            <figcaption>Green — mostly blocked</figcaption>
+            <figcaption>Green — mostly blocked by the gel</figcaption>
           </figure>
           <figure>
             <div class="canvas-frame"><canvas id="ch-b" width="260" height="195"></canvas></div>
@@ -222,5 +222,6 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/colormap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/feed.js') }}"></script>
 <script src="{{ url_for('static', filename='js/debug.js') }}"></script>
 {% endblock %}

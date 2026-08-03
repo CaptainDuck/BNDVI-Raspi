@@ -8,8 +8,13 @@ Two jobs:
    arbitrates both; a capture pauses the preview and resumes it afterwards.
 
 2. Feed the Debug view. Rather than encoding four JPEG streams on the Pi, the
-   preview sends the browser a small pair of NIR and blue channel planes and
-   lets JS derive BNDVI and paint all seven canvases. That means the k slider,
+   preview sends the browser small NIR, green and blue channel planes and lets
+   JS derive BNDVI and paint all seven canvases.
+
+   Green is sent even though the index ignores it, for two reasons: the channel
+   split panel claims to show a measured channel and should actually do so, and
+   the setup wizard uses green to work out whether the blue gel is fitted at all
+   (without it, green dominates on foliage; with it, green is suppressed). That means the k slider,
    the threshold sliders and the correction toggle respond with no server
    round-trip at all, and the four renders cannot drift out of sync because
    they all come from one array. The Pi's only job per frame is grab →
@@ -61,7 +66,7 @@ class CameraService:
         self.dev_mode = dev_mode
         self._lock = threading.Lock()          # serialises hardware access
         self._frame_lock = threading.Lock()
-        self._frame = None                     # (nir, blue) float32 planes
+        self._frame = None                     # (nir, green, blue) float32 planes
         self._frame_meta = {}
         self._frame_seq = 0
         self._thread = None
@@ -144,9 +149,9 @@ class CameraService:
                 time.sleep(0.1)
                 continue
             try:
-                nir, blue, meta = self._grab()
+                nir, green, blue, meta = self._grab()
                 with self._frame_lock:
-                    self._frame = (nir, blue)
+                    self._frame = (nir, green, blue)
                     self._frame_meta = meta
                     self._frame_seq += 1
             except Exception as exc:
@@ -162,11 +167,11 @@ class CameraService:
             time.sleep(1.0 / fps)
 
     def _grab(self):
-        """One frame as (nir, blue, meta), already downsampled."""
+        """One frame as (nir, green, blue, meta), already downsampled."""
         if self.using_synthetic():
             scene = self.settings.get("preview_scene", "mixed")
-            nir, blue = bndvi.synthetic_field(scene, jitter=self._jitter)
-            return nir, blue, {"source": "synthetic", "scene": scene}
+            nir, green, blue = bndvi.synthetic_field(scene, jitter=self._jitter)
+            return nir, green, blue, {"source": "synthetic", "scene": scene}
 
         with self._lock:
             cam = self._open_locked()
@@ -183,6 +188,7 @@ class CameraService:
         mismatches = bndvi.verify_controls(getattr(self, "_wanted", {}),
                                            metadata or {})
         return (small[:, :, 0].astype(np.float32),
+                small[:, :, 1].astype(np.float32),
                 small[:, :, 2].astype(np.float32),
                 {"source": "camera", "mismatches": mismatches})
 
@@ -244,29 +250,26 @@ class CameraService:
     # ── reading frames ────────────────────────────────────────────────────
 
     def latest(self, wait=True):
-        """Most recent (nir, blue, meta, seq). Starts the loop on demand."""
+        """Most recent (nir, green, blue, meta, seq). Starts the loop on demand."""
         self.start_preview()
         deadline = time.time() + (FRAME_WAIT_S if wait else 0)
         while True:
             with self._frame_lock:
                 if self._frame is not None:
-                    nir, blue = self._frame
-                    return nir, blue, dict(self._frame_meta), self._frame_seq
+                    nir, green, blue = self._frame
+                    return (nir, green, blue, dict(self._frame_meta),
+                            self._frame_seq)
             if time.time() >= deadline:
-                return None, None, {"source": "none",
-                                    "error": self._last_error}, self._frame_seq
+                return None, None, None, {"source": "none",
+                                          "error": self._last_error}, \
+                       self._frame_seq
             time.sleep(0.03)
 
     def latest_rgb(self):
-        """The current preview frame as an RGB array, for 'save as capture'.
-
-        Reconstructs green the way the gel behaves (mostly blocked) so the saved
-        frame flows through the exact same analysis path as a real capture.
-        """
-        nir, blue, meta, _ = self.latest()
+        """The current preview frame as an RGB array, for 'save as capture'."""
+        nir, green, blue, meta, _ = self.latest()
         if nir is None:
             return None, meta
-        green = 0.28 * nir + 0.25 * blue
         rgb = np.stack([nir, green, blue], -1).clip(0, 255).astype(np.uint8)
         return rgb, meta
 
@@ -276,7 +279,7 @@ class CameraService:
         This is what makes white-reference calibration a drag-a-box gesture
         instead of a trip to a text editor.
         """
-        nir, blue, meta, _ = self.latest()
+        nir, green, blue, meta, _ = self.latest()
         if nir is None:
             return None
         h, w = nir.shape
@@ -288,7 +291,10 @@ class CameraService:
         cx1, cy1 = min(w, cx1), min(h, cy1)
         return {
             "nir": float(nir[cy0:cy1, cx0:cx1].mean()),
+            "green": float(green[cy0:cy1, cx0:cx1].mean()),
             "blue": float(blue[cy0:cy1, cx0:cx1].mean()),
+            "nir_max": float(nir[cy0:cy1, cx0:cx1].max()),
+            "blue_max": float(blue[cy0:cy1, cx0:cx1].max()),
             "pixels": int((cy1 - cy0) * (cx1 - cx0)),
             "source": meta.get("source"),
         }

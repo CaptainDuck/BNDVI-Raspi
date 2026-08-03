@@ -3,9 +3,19 @@
 How to set up the Pi NoIR v2 + Rosco #2007 blue filter so the BNDVI numbers
 actually mean something, and how to verify it.
 
-Everything here is now doable from the **Debug** view in the dashboard. The old
-version of this guide told you to edit constants in `bndvi.py` with a text editor
-and inspect pixel values in a file browser; you don't need to any more.
+> **If you'd rather be walked through it:** the dashboard has a guided
+> walkthrough at **“Set up the camera”** that covers everything below, checks each
+> step against the live feed, and tells you what the answer means. This document
+> is the same material in prose, for when you want the reasoning.
+
+Everything here is doable from the dashboard. The old version of this guide told
+you to edit constants in `bndvi.py` with a text editor and inspect pixel values in
+a file browser; you don't need to any more.
+
+Also worth settling up front: **the blue gel that came in the Pi NoIR box is the
+Rosco #2007.** Raspberry Pi's announcement of it names it as "Roscolux #2007
+Storaro Blue" and says they cut it into squares at the factory in Wales. If yours
+is missing, Rosco sheets are cheap and one sheet does hundreds of cameras.
 
 ## Why calibration matters
 
