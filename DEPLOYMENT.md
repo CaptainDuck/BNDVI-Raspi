@@ -126,8 +126,8 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/Hylocropter/hylocropter
-ExecStart=/usr/bin/python3 app.py --host 0.0.0.0 --port 5000
+WorkingDirectory=/home/pi/Hylocropter
+ExecStart=/usr/bin/python3 hylocropter/app.py --host 0.0.0.0 --port 5000
 Restart=on-failure
 RestartSec=5
 

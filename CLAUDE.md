@@ -24,24 +24,29 @@ see "Hardware-specific physics" below for why.
 
 ## Commands
 
-All commands run from `hylocropter/`.
+**Working directory is irrelevant** — both entry points derive their paths from
+`Path(__file__).parent`, so `python hylocropter/app.py` from the repo root and
+`cd hylocropter && python app.py` behave identically, and data always lands in
+`hylocropter/hylocropter_data/`. Keep it that way: a cwd-relative default here
+means a stray untracked data folder wherever the user happened to be standing.
 
 ```bash
-pip install -r requirements.txt
+pip install -r hylocropter/requirements.txt
 
-# One-off CLI capture. Outputs to ./hylocropter_data/ground/.
-python bndvi.py
-python bndvi.py --dev                    # synthetic frame, no camera
-python bndvi.py --dev --scene soil       # healthy|mixed|stressed|soil
-python bndvi.py --correct-nir --k 0.35   # opt-in NIR-leakage correction
-python bndvi.py --save-array             # float32 BNDVI as .npz
-python bndvi.py --raw                    # also save the Bayer frame as DNG
+# One-off CLI capture. Outputs to hylocropter/hylocropter_data/ground/.
+python hylocropter/bndvi.py
+python hylocropter/bndvi.py --dev                  # synthetic frame, no camera
+python hylocropter/bndvi.py --dev --scene soil     # healthy|mixed|stressed|soil
+python hylocropter/bndvi.py --correct-nir --k 0.35 # opt-in leakage correction
+python hylocropter/bndvi.py --save-array           # float32 BNDVI as .npz
+python hylocropter/bndvi.py --raw                  # also save the Bayer frame as DNG
+python hylocropter/bndvi.py -o /some/where         # override the output dir
 
 # Dashboard
-python app.py                            # localhost
-python app.py --host 0.0.0.0 --port 5000 # expose on the LAN (for the Pi)
-python app.py --dev                      # synthetic frames (laptop dev)
-python app.py --debug                    # Flask reloader on
+python hylocropter/app.py                            # localhost
+python hylocropter/app.py --host 0.0.0.0 --port 5000 # expose on the LAN (the Pi)
+python hylocropter/app.py --dev                      # synthetic frames (laptop)
+python hylocropter/app.py --debug                    # Flask reloader on
 ```
 
 There is **no test suite, linter, or build step** — this is a small student

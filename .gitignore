@@ -218,5 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Hylocropter runtime state — captures, flights, settings, logs.
-# Regenerated on first run; never useful in git.
-hylocropter/hylocropter_data/
+# Regenerated on first run; never useful in git. Unanchored so a run from an
+# unexpected working directory can't sneak one into a commit.
+hylocropter_data/
+bndvi_output/

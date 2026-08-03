@@ -1065,11 +1065,16 @@ def _cli():
                    help="also write the float32 BNDVI array as .npz")
     p.add_argument("--raw", action="store_true",
                    help="also save the unprocessed Bayer frame as DNG")
-    p.add_argument("-o", "--output", default="./hylocropter_data/ground",
-                   help="output directory")
+    # Default is relative to this file, not the working directory, so
+    # `python hylocropter/bndvi.py` from the repo root writes to the same place
+    # the dashboard reads from instead of dropping a stray folder wherever you
+    # happened to be standing.
+    p.add_argument("-o", "--output",
+                   default=str(Path(__file__).parent / "hylocropter_data" / "ground"),
+                   help="output directory (default: alongside bndvi.py)")
     args = p.parse_args()
 
-    output_dir = Path(args.output)
+    output_dir = Path(args.output).resolve()
     print("=" * 60)
     print("  Hylocropter BNDVI Capture - Pi NoIR + Rosco #2007")
     print("=" * 60)

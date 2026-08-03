@@ -113,23 +113,27 @@ how to mount the gel without damaging the lens.
 ## Setup
 
 ```bash
-cd hylocropter
 sudo apt update
 sudo apt install -y python3-picamera2 python3-pip libatlas-base-dev
-pip install -r requirements.txt
+pip install -r hylocropter/requirements.txt
 ```
 
 Enable the camera (`sudo raspi-config` → Interface Options → Camera), reboot if
 needed, then test the capture path on its own:
 
 ```bash
-python bndvi.py                    # one capture, writes to ./hylocropter_data/ground/
-python bndvi.py --dev              # synthetic frame, no camera needed
-python bndvi.py --dev --scene soil # pick a synthetic scene
-python bndvi.py --correct-nir --k 0.35
-python bndvi.py --save-array       # also write the float32 BNDVI as .npz
-python bndvi.py --raw              # also save the unprocessed Bayer frame as DNG
+python hylocropter/bndvi.py            # one capture
+python hylocropter/bndvi.py --dev      # synthetic frame, no camera needed
+python hylocropter/bndvi.py --dev --scene soil
+python hylocropter/bndvi.py --correct-nir --k 0.35
+python hylocropter/bndvi.py --save-array   # float32 BNDVI as .npz
+python hylocropter/bndvi.py --raw          # also save the Bayer frame as DNG
 ```
+
+**Working directory doesn't matter.** Both scripts resolve their paths relative to
+their own file, so you can run them from the repo root, from inside
+`hylocropter/`, or by absolute path — output always lands in
+`hylocropter/hylocropter_data/`. Use `-o` on `bndvi.py` to put it elsewhere.
 
 `bndvi.py` has no Flask dependency and is the project's minimal reproducer —
 `python bndvi.py --dev` should always work.
@@ -137,11 +141,12 @@ python bndvi.py --raw              # also save the unprocessed Bayer frame as DN
 ## Run the dashboard
 
 ```bash
-cd hylocropter
-python app.py --host 0.0.0.0 --port 5000     # on the Pi
-python app.py --dev                          # laptop, synthetic frames
-python app.py --debug                        # Flask reloader
+python hylocropter/app.py --host 0.0.0.0 --port 5000   # on the Pi
+python hylocropter/app.py --dev                        # laptop, synthetic frames
+python hylocropter/app.py --debug                      # Flask reloader
 ```
+
+(`cd hylocropter && python app.py …` works identically.)
 
 Open `http://<pi-ip>:5000/`, or `http://hylocropter.local:5000/` once the Pi is
 set up as an access point (see [DEPLOYMENT.md](./DEPLOYMENT.md)).
