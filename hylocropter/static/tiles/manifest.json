@@ -1,0 +1,33 @@
+{
+  "centre": [
+    14.1265,
+    121.0768
+  ],
+  "bounds": {
+    "south": 14.123715235357528,
+    "west": 121.07392839585611,
+    "north": 14.129284764642472,
+    "east": 121.0796716041439
+  },
+  "box_m": 620,
+  "area_ha": 38.4,
+  "zooms": [
+    16,
+    17,
+    18,
+    19
+  ],
+  "per_zoom": {
+    "16": 4,
+    "17": 9,
+    "18": 25,
+    "19": 100
+  },
+  "tiles": 138,
+  "failed": 0,
+  "bytes": 1940984,
+  "downloaded_at": "2026-08-03T13:00:10",
+  "source": "Esri World Imagery",
+  "attribution": "Imagery \u00a9 Esri",
+  "complete": true
+}

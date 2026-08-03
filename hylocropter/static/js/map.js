@@ -67,41 +67,92 @@
      bounds. Cells the drone never flew over stay transparent rather than being
      painted mid-range — inventing healthy ground is exactly the kind of thing a
      farmer would act on. */
+  /** Nearest covered cell for every empty cell.
+   *
+   * Used for interpolation only. Without it, smooth upscaling blends each
+   * covered cell's *alpha* toward its empty neighbours and a sparse flight
+   * fades to nearly invisible over the imagery. Filling gives the interpolator
+   * colour to work with; the alpha mask below then hides the filled cells
+   * completely, so no unvisited ground is ever shown — which is the whole point
+   * of keeping empty cells null in the first place.
+   */
+  function fillNearest(cells, cols, rows) {
+    const filled = cells.slice();
+    const known = [];
+    for (let i = 0; i < cells.length; i++) {
+      if (cells[i] !== null && cells[i] !== undefined) {
+        known.push([i % cols, (i / cols) | 0, cells[i]]);
+      }
+    }
+    if (!known.length) return filled;
+    for (let i = 0; i < filled.length; i++) {
+      if (filled[i] !== null && filled[i] !== undefined) continue;
+      const x = i % cols, y = (i / cols) | 0;
+      let best = Infinity, val = known[0][2];
+      for (let k = 0; k < known.length; k++) {
+        const dx = known[k][0] - x, dy = known[k][1] - y;
+        const d = dx * dx + dy * dy;
+        if (d < best) { best = d; val = known[k][2]; }
+      }
+      filled[i] = val;
+    }
+    return filled;
+  }
+
   function gridCanvas() {
     const g = flight.grid;
     if (!g) return null;
+    const th = flight.thresholds || { healthy: 0.3, moderate: 0.1 };
+    const smooth = mode !== 'bands';
+    const colours = smooth ? fillNearest(g.cells, g.cols, g.rows) : g.cells;
+
     const cv = document.createElement('canvas');
     cv.width = g.cols;
     cv.height = g.rows;
     const ctx = cv.getContext('2d');
     const img = ctx.createImageData(g.cols, g.rows);
-    const th = flight.thresholds || { healthy: 0.3, moderate: 0.1 };
-    for (let i = 0; i < g.cells.length; i++) {
-      const v = g.cells[i];
-      if (v === null || v === undefined) {
-        img.data[i * 4 + 3] = 0;
-        continue;
-      }
+    for (let i = 0; i < colours.length; i++) {
+      const v = colours[i];
+      if (v === null || v === undefined) { img.data[i * 4 + 3] = 0; continue; }
       const c = mode === 'bands'
         ? Colormap.band(v, th.healthy, th.moderate)
         : Colormap.cmap(v);
       img.data[i * 4] = c[0];
       img.data[i * 4 + 1] = c[1];
       img.data[i * 4 + 2] = c[2];
-      img.data[i * 4 + 3] = 205;
+      img.data[i * 4 + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
 
-    // Upscale so Leaflet gets a reasonably sized image. Smooth interpolation
-    // for the continuous view; hard edges for the three-colour view, where a
-    // blurred boundary would misrepresent a threshold.
+    const scale = 24;
     const big = document.createElement('canvas');
-    big.width = g.cols * 24;
-    big.height = g.rows * 24;
+    big.width = g.cols * scale;
+    big.height = g.rows * scale;
     const bctx = big.getContext('2d');
-    bctx.imageSmoothingEnabled = mode !== 'bands';
+
+    // Smooth interpolation for the continuous view; hard edges for the
+    // three-colour view, where a blurred boundary would misrepresent a threshold.
+    bctx.imageSmoothingEnabled = smooth;
     bctx.imageSmoothingQuality = 'high';
     bctx.drawImage(cv, 0, 0, big.width, big.height);
+
+    // Punch out everything the drone did not photograph. Drawn unsmoothed so
+    // the coverage boundary stays crisp and honest.
+    const mask = document.createElement('canvas');
+    mask.width = g.cols;
+    mask.height = g.rows;
+    const mctx = mask.getContext('2d');
+    const mimg = mctx.createImageData(g.cols, g.rows);
+    for (let i = 0; i < g.cells.length; i++) {
+      const covered = g.cells[i] !== null && g.cells[i] !== undefined;
+      mimg.data[i * 4] = mimg.data[i * 4 + 1] = mimg.data[i * 4 + 2] = 255;
+      mimg.data[i * 4 + 3] = covered ? 210 : 0;
+    }
+    mctx.putImageData(mimg, 0, 0);
+    bctx.globalCompositeOperation = 'destination-in';
+    bctx.imageSmoothingEnabled = false;
+    bctx.drawImage(mask, 0, 0, big.width, big.height);
+
     return big.toDataURL();
   }
 
