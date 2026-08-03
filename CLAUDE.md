@@ -57,7 +57,7 @@ the NoIR sensor (no IR-cut filter) the Bayer channels then map to:
 | Channel        | What it actually captures             |
 |----------------|---------------------------------------|
 | Red Bayer (0)  | NIR (red light is blocked by the gel) |
-| Green Bayer(1) | Mostly blocked — unused by the index  |
+| Green Bayer(1) | Mostly blocked (8–18% transmission) — unused |
 | Blue Bayer (2) | Visible blue + some NIR contamination |
 
 So `BNDVI = (NIR − Blue) / (NIR + Blue) = (R − B) / (R + B)`. Healthy plants
@@ -75,9 +75,13 @@ reintroduced — fix it.
 Blue Bayer pixels also pick up NIR. `compute_bndvi` has an opt-in mode that
 estimates visible blue as `max(ε, B − k·R)` before the index.
 
-`DEFAULT_NIR_LEAK_COEF = 0.8` is what this repo used to attribute to Public Lab /
-Ned Horning. **That attribution could not be verified and the value appears
-nowhere in the thesis** (`RESEARCH-GAPS.md` §2). Do not present it as sourced.
+`DEFAULT_NIR_LEAK_COEF = 0.8` **is** Ned Horning's — it's the hard-coded default
+in Public Lab's PhotoMonitoringPlugin. But it is for a MidOpt DB660/850
+narrowband *red* filter with the channels reversed, justified by red and blue
+pixels having similar NIR sensitivity at 850 nm. The Rosco #2007 passes NIR
+broadly from ~695 nm, where Horning himself notes red pixels are much more
+NIR-sensitive — so the right `k` here is well below 0.8. Do not describe 0.8 as
+a value for this rig (`RESEARCH-GAPS.md` §2).
 
 The right answer is to measure it. A white reference must read BNDVI ≈ 0, so
 `R = B − k·R` gives **`k = B/R − 1`** — implemented as `bndvi.solve_leak_coef()`

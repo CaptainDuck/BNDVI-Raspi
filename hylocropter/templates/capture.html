@@ -32,6 +32,15 @@
     <div style="font-size:14px;color:var(--color-accent-800)">
       ⚠ {{ r.exposure_check.text }}</div>
   {% endif %}
+  {% if r.control_check and r.control_check.mismatches %}
+    {# The camera accepted the locked settings and then did something else. Every
+       number below is suspect, so say so at the top rather than in a footnote. #}
+    <div style="font-size:14px;color:var(--color-accent-800)">
+      ⚠ The camera did not honour the locked settings on this capture, so treat
+      these numbers with caution:
+      {% for m in r.control_check.mismatches %}<br>&nbsp;&nbsp;· {{ m }}{% endfor %}
+    </div>
+  {% endif %}
 </div>
 
 {% if r.files_purged %}
@@ -98,6 +107,8 @@
           {{ kv('NIR correction', ('on (k = %.2f)'|format(r.settings.nir_leak_coef))
                 if r.settings.correct_nir_leakage else 'off') }}
           {{ kv('Format', r.settings.capture_format|default('rgb888')) }}
+          {{ kv('ISP neutralised', 'yes' if r.settings.neutralise_isp else
+                ('n/a (synthetic)' if r.settings.dev_mode else 'no')) }}
           {{ kv('Mode', 'synthetic (dev)' if r.settings.dev_mode else 'camera') }}
           {{ kv('Filter', 'Rosco #2007') }}
           {% if r.process_ms %}{{ kv('Processing time', r.process_ms ~ ' ms') }}{% endif %}

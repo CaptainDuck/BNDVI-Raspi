@@ -569,6 +569,9 @@ def api_preview_frame():
     resp.headers["X-Frame-Height"] = str(camera_mod.PREVIEW_H)
     resp.headers["X-Frame-Seq"] = str(seq)
     resp.headers["X-Frame-Source"] = meta.get("source", "unknown")
+    # Locks the camera silently ignored, so the Debug view can say so.
+    if meta.get("mismatches"):
+        resp.headers["X-Control-Mismatch"] = " | ".join(meta["mismatches"])[:400]
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

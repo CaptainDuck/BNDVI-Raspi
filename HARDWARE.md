@@ -106,6 +106,38 @@ between the lens and the sensor, and re-tighten.
 lens by hand against a known target afterwards, and risk losing focus
 permanently. Skip unless the other methods genuinely don't work.
 
+## What the gel actually does
+
+From Rosco's official Cinegel data sheet for **#2007 VS BLUE** ("Color Effects Lighting
+Filter. Deep Reddish-Blue"): overall transmission **10%**, a **−3.3 stop** light loss,
+deep-dyed polyester film, 2.0 mil (50 µm). Note Rosco's own sheet says *Cinegel*, not
+Roscolux, even though the Pi documentation and everyone else says "Roscolux #2007".
+
+Transmission on the sheet's 20 nm grid:
+
+| nm | 360 | 380 | 400 | 420 | 440 | 460 | 480 | 500 | 520 | 540 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **T%** | 23 | 31 | 40 | 53 | 53 | 41 | 27 | 18 | 11 | 10 |
+
+| nm | 560 | 580 | 600 | 620 | 640 | 660 | 680 | 700 | 720 | 740 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **T%** | 8 | 7 | 5 | 3 | 2 | 2 | 4 | 15 | 42 | 67 |
+
+So: a broad blue maximum of **53% at 420–440 nm**, a deep red block bottoming at **2% at
+640–660 nm**, and a steep NIR cut-on — 10% at ≈695 nm, 50% at ≈725 nm, **67% at 740 nm and
+still rising** where the chart ends.
+
+Two consequences worth knowing:
+
+- **Green is not blocked**, only attenuated: 8–18% across 500–560 nm, about a fifth of peak
+  blue. The index ignores the green channel, but the leak is real.
+- **The −3.3 stop loss is why exposure and gain need raising** compared to an unfiltered
+  camera. It also means the gel costs you light you'd otherwise spend on a shorter shutter,
+  which matters for motion blur on the drone.
+
+Source: [Rosco #2007 Storaro Blue](https://us.rosco.com/en/products/filters/r2007-storaro-blue).
+Good figure for the paper — the thesis currently gives no spectral data at all.
+
 ## Practical tips
 
 - **Handle the gel by the edges** to avoid fingerprints in the optical path.

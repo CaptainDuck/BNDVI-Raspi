@@ -30,6 +30,12 @@ DEFAULTS = {
     "resolution": list(bndvi.DEFAULT_RESOLUTION),
     "colour_gains": list(bndvi.DEFAULT_COLOUR_GAINS),
     "capture_format": "rgb888",          # or "raw_dng"
+    # Load a tuning override that turns off the ISP stages no control can reach:
+    # the colour correction matrix (which otherwise mixes GREEN into both R and
+    # B), the adaptive tone curve, and per-channel lens shading. On by default
+    # because leaving them on is a first-order threat to the index -- see
+    # bndvi.neutral_tuning() and RESEARCH-GAPS.md section 4.
+    "neutralise_isp": True,
     "save_array": True,                  # keep the float32 BNDVI for mapping
 
     # ── index ─────────────────────────────────────────────────────────────
@@ -233,6 +239,7 @@ class Settings:
             "threshold_moderate": self._values["threshold_moderate"],
             "save_array": self._values["save_array"],
             "capture_format": self._values["capture_format"],
+            "neutralise_isp": self._values["neutralise_isp"],
         }
 
     def thresholds(self):

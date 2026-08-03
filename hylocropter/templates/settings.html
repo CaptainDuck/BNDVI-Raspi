@@ -75,10 +75,22 @@
              {{ 'checked' if cfg.save_array }}><span class="dot"></span>
       Keep the raw BNDVI array with each photo (needed for the farm map)
     </label>
+    <label class="radio">
+      <input type="checkbox" data-setting="neutralise_isp"
+             {{ 'checked' if cfg.neutralise_isp }}><span class="dot"></span>
+      Neutralise the image-processing pipeline (recommended)
+    </label>
     <div style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent)">
       Auto white balance and auto exposure stay locked during flight so captures
       stay comparable. JPEG is gamma-encoded, so the raw DNG is the honest input
       for calibration work — at the cost of about 10 MB per photo.
+      <br><br>
+      <strong>Neutralising the pipeline matters more than it sounds.</strong>
+      Locking white balance still leaves the camera applying a colour-correction
+      matrix that mixes the <em>green</em> channel into both red and blue — the
+      channel this rig treats as blocked. A white card still reads zero, so
+      calibration can't detect it, but vegetation readings shift by enough to
+      move a plant across the healthy boundary. See RESEARCH-GAPS.md §4.
     </div>
   </div>
 

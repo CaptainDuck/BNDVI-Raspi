@@ -1,22 +1,37 @@
 # Research Gaps & Open Questions
 
-Things I could **not** verify while building the Hylocropter dashboard, why, and what
-would close each gap. Written so you can pick these up yourself — most need either a
-browser on an unrestricted network, or ten minutes with the actual rig.
+What could and could not be verified while building the Hylocropter dashboard, and what
+would close each remaining gap.
+
+Sections 1, 2, 3 and 8 are **resolved** — network access was opened up mid-build, so the
+practitioner sources have now been read and the basemap is downloaded. §2 in particular
+changed the story materially: `k = 0.8` turned out to be a real Public Lab value for the
+*wrong filter*, which is worse than being unsourced, and the code comments and docs have
+been corrected.
+
+What's left needs either the rig in your hands or a decision about the paper.
 
 Each item is tagged with how much it matters:
 
 - 🔴 **Blocks correctness** — the numbers may be wrong until this is resolved
 - 🟠 **Affects quality** — the system works, but could be meaningfully better
 - 🟡 **Documentation only** — needed for the paper/defense, not for the code
+- ✅ **Resolved** — kept for the record, and because some of it belongs in the writeup
 
 ---
 
-## 1. Sources I was blocked from reading
+## 1. ✅ RESOLVED — the sources are readable now
 
-The environment I was working in restricts outbound HTTPS by policy. Every one of the
-authoritative practitioner sources for this exact camera rig returned `403` at the
-proxy's CONNECT stage:
+Network access was opened up, so the sources below have been read and §2, §3 and §8 are
+settled. Kept for the record, plus one practical note.
+
+**Public Lab now serves a client-side static archive** (`publiclab/publiclab-archive`), so
+the pages are an empty SPA shell to anything but a real browser. Append `.md` to get the
+raw text — e.g.
+`https://publiclab.org/notes/nedhorning/10-21-2013/calibrating-diy-nir-cameras-part-1.md`.
+Useful if you're citing them and want to quote exactly.
+
+The sources that mattered:
 
 | Source | Why it matters |
 |---|---|
@@ -28,97 +43,316 @@ proxy's CONNECT stage:
 | `arxiv.org`, `mdpi.com`, `link.springer.com` | the academic literature on single-sensor NDVI |
 | every satellite tile server (Esri, OSM, Carto, Mapbox, Bing) | offline basemap imagery |
 
-What **did** work: `pypi.org`, `registry.npmjs.org`, `fonts.gstatic.com`,
-`raw.githubusercontent.com`, and web search (which returns titles and snippets, not full
-pages). So the picamera2 code patterns in this repo are verified against the official
-`raspberrypi/picamera2` GitHub examples — but nothing from the list above is.
-
-**To close:** open those URLs in a normal browser. They're all public. The two Public Lab
-notes are the important ones.
+All read. What they changed is in §2 (the `k` story), §3 (the spectral curve) and §5 (the
+thresholds now have a source, even if a generic one).
 
 ---
 
-## 2. 🔴 The NIR-leakage coefficient `k = 0.8` has no verified provenance
+## 2. ✅ RESOLVED — `k = 0.8` is real, but it belongs to a different filter
 
-This repo says, in `bndvi.py`, `README.md` and `CALIBRATION.md`, that `k = 0.8` is
-"Public Lab / Ned Horning's value for this exact rig", with a practitioner range of
-0.3–0.8.
+**Status: settled.** The practitioner sources are readable now and I've traced this to
+the bottom. The short version: the *formula* in this repo is genuinely Ned Horning's, and
+`0.8` is genuinely his default — but it is a value for the **opposite kind of filter**,
+and using it here is wrong in a way his own writing predicts.
 
-**I could not verify any part of that claim.** The Public Lab pages are blocked, and web
-search surfaced no source for either the specific `vis_blue = B − k·R` formulation or for
-`k = 0.8`. It also appears **nowhere in your thesis** — the paper proposes no leakage
-correction at all.
+**What checks out.** `vis = B − k·R` is Horning's, from Public Lab's
+[PhotoMonitoringPlugin](https://publiclab.org/notes/nedhorning/07-22-2015/introducing-the-calibration-plugin-for-imagej-fiji)
+(2015): *"subtract a percentage of the NIR pixel values from the visible pixel values.
+This is useful since the visible channel records both visible and NIR light."* The
+[source](https://github.com/nedhorning/PhotoMonitoringPlugin) does exactly what we do:
 
-So right now `k = 0.8` is an unsourced magic number sitting in three files and being
-presented to the reader as a citation. That's the kind of thing that gets asked about in
-a defense.
+```java
+visPixel = visImage.getProcessor().getPixelValue(x, y) - (percentToSubtract * nirPixel);
+```
 
-**Three ways to close it, best first:**
+And `0.8` is that plugin's hard-coded default — `percentToSubtract = 80.0`, subtraction
+on by default. So the old attribution wasn't invented.
 
-1. **Measure it.** This is now a one-click operation in the dashboard and it beats any
-   citation. A white reference reflects roughly equally across NIR and visible, so it
-   should read BNDVI ≈ 0. Setting `R = B − k·R` and solving gives:
+**What doesn't.** Horning's 80% is for a **MidOpt DB660/850 narrowband red/NIR filter**,
+with the channels the other way round (blue ≈ NIR, red = red+NIR). His justification is
+filter-specific:
 
-   ```
-   k = B/R − 1
-   ```
+> "this DB660/850 filter gets around that by centering the NIR band at 850nm where the
+> sensitivity of the red detectors is roughly the same as the blue detectors"
 
-   Put white paper in the frame, open **Debug**, drag a box over the paper, and the
-   dashboard computes `k` from the mean R and B inside it. That's *your* `k`, for *your*
-   gel, sensor and lighting — strictly better than a number off the internet.
-   *(If it comes out negative, no positive `k` can help; that means the red channel is
-   over-responding and you should lower exposure or gain instead. The UI says so.)*
-2. Read Horning's Public Lab note and either confirm the value or correct the attribution.
-3. If neither, weaken the wording in the docs from a citation to "a commonly quoted
-   starting value" and lean on the measured number.
+That condition does **not** hold for a Rosco #2007, which passes NIR broadly from ~695 nm.
+Horning says so himself, in the same paragraph:
+
+> "The one advantage of blue filters over very broad band red filters is that the red
+> detectors in the camera sensor are much more sensitive to the shorter NIR wavelengths"
+
+So for this rig `k` should be **well below 0.8**. The `SYNTH_LEAK = 0.35` used by dev mode
+is a more plausible neighbourhood.
+
+**Where the bogus attribution probably came from.** On the canonical Pi NoIR + Rosco page,
+[What's that blue thing doing here?](https://www.raspberrypi.com/news/whats-that-blue-thing-doing-here/),
+Chris Fastie writes that with this rig you get *"healthy plants between 0.2 and 0.8"* —
+an **NDVI output ceiling**, not a leakage coefficient. Two unrelated 0.8s appear to have
+been merged.
+
+**Also corrected:**
+- *"Practitioner range is 0.3–0.8"* — **unsourced.** Not in any source; the plugin accepts
+  0–100 with no guidance. Removed from the docs.
+- *Horning's "part 1" is the origin of the method* — **wrong.** The 2013 three-part series
+  is about reference-target regression and never mentions leakage subtraction. The method
+  arrives in 2015.
+- *The `carolccarvalho` note supports the method* — **no.** It's a student asking for help,
+  with no `k` and no correction. Its value is confirming that #2007 ships with the NoIR and
+  that `(R−B)/(R+B)` is the intended index.
+
+### The white-card solver: keep it, but know its biases
+
+Still the right thing to do — and now the docs say what it is rather than overselling it.
+Three caveats worth carrying into the writeup:
+
+1. **"White reflects equally in NIR and visible" is approximate.** Horning's measured
+   printer paper is 0.867 at 660 nm vs 0.900 at 850 nm — a true NDVI of about **+0.02**,
+   not 0. Forcing 0 biases `k` slightly high.
+2. **Optical brighteners make it worse here.** Office paper is engineered to reflect more
+   *blue*, which is the band we compare against. Use a grey card without brighteners.
+   Horning's own advice: *"It's best if the reflectance samples have a fairly flat spectral
+   curve."*
+3. **One target can't separate gain from offset.** This `k` absorbs per-channel gain
+   asymmetry along with physical leakage. It's a rig-and-settings fudge factor that makes
+   your numbers self-consistent — not a physical responsivity ratio. Don't call it one.
+4. **A passing white-card calibration does not prove the channels are clean.** This is the
+   nastiest one, and it comes from §4: the camera's colour correction matrix is
+   white-preserving, so it reads ≈0 on a neutral card whether or not it is corrupting your
+   vegetation pixels. Confirm **ISP neutralised: yes** on the capture detail page before
+   trusting a solved `k`.
+
+**What Public Lab actually prescribes**, if you want defensible radiometry rather than a
+working demo: a linear regression of reflectance on pixel value against **at least a bright
+and a dark characterised target**. Put both in frame, look up their reflectance at your
+passband centres, solve a per-channel gain and offset. Horning's own summary: *"Applying
+the regression coefficients is just applying a gain and offset to each image."* His
+procedure in full is in
+[part 1](https://publiclab.org/notes/nedhorning/10-21-2013/calibrating-diy-nir-cameras-part-1)
+— note it needs the *2014 November 25* Fiji life-line build; current Fiji is incompatible
+with the plugin.
+
+Chris Fastie, on single-target shortcuts like ours:
+[*"This is a very subjective method and has probably never been tried…"*](https://publiclab.org/notes/cfastie/05-01-2016/calibration-cogitation)
+Fair. It's within Public Lab practice, and explicitly not calibration.
 
 ---
 
-## 3. 🟠 Rosco #2007 spectral transmission curve
+## 3. ✅ RESOLVED — Rosco #2007 spectral transmission
 
-We assert the gel "passes blue (~400–500 nm) and NIR (>700 nm), blocks red and green".
-Directionally this is corroborated by multiple independent search snippets and it's
-consistent with what the rig actually produces, but **I have no curve and no numbers** —
-no cut-on/cut-off wavelengths, no transmission percentages. One snippet mentioned
-"transmission of 10%" without context.
+Got the official data sheet:
+[us.rosco.com/en/products/filters/r2007-storaro-blue](https://us.rosco.com/en/products/filters/r2007-storaro-blue),
+chart at [2007.jpg](https://us.rosco.com/sites/default/files/content/filters//cinegel/2007.jpg).
+Worth a footnote for the paper: **Rosco's own sheet calls it Cinegel, not Roscolux**, even
+though everyone says "Roscolux #2007".
 
-This matters beyond documentation: the shape of the blue passband determines how much
-NIR the blue channel picks up, which is exactly what `k` corrects for. A curve would let
-you *predict* `k` rather than measure it.
+Header data: *#2007 VS BLUE*, "Color Effects Lighting Filter. Deep Reddish-Blue",
+**transmission 10% / −3.3 stop loss**, deep-dyed polyester (PET) film, 2.0 mil (50 µm),
+made in USA. No mired shift.
 
-**To close:** Rosco publishes spectral data per gel on their site (blocked here). Search
-"Rosco Roscolux 2007 Storaro Blue spectral energy distribution". Drop the curve into
-`HARDWARE.md` — it's a good figure for the paper.
+Published transmission, on the sheet's own 20 nm grid:
+
+| nm | 360 | 380 | 400 | 420 | 440 | 460 | 480 | 500 | 520 | 540 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **T%** | 23 | 31 | 40 | 53 | 53 | 41 | 27 | 18 | 11 | 10 |
+
+| nm | 560 | 580 | 600 | 620 | 640 | 660 | 680 | 700 | 720 | 740 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **T%** | 8 | 7 | 5 | 3 | 2 | 2 | 4 | 15 | 42 | 67 |
+
+Shape: 23% at 360 nm rising to a broad blue maximum of **53–55% across 420–440 nm**,
+falling monotonically through green to a deep red minimum of **2% at 640–660 nm**, then
+climbing steeply into the NIR — **4% at 680, 15% at 700, 42% at 720, 67% at 740**, still
+rising where the chart ends. Derived edges: NIR crosses 10% at ≈695 nm and 50% at ≈725 nm.
+
+**Two findings that changed the code's comments:**
+
+1. **Green is not blocked.** 8–18% between 500 and 560 nm, against a 53% blue peak — about
+   a fifth of peak blue. Calling it "blocked" was too strong; the docs now say "mostly
+   blocked (8–18%)". This is exactly the leakage Horning tried to absorb with a
+   green-as-second-predictor multiple regression, and judged inconclusive.
+2. **The sheet stops at 740 nm**, so it does *not* characterise the 750–900 nm range where
+   the silicon collects most of its NIR. **The data sheet therefore cannot be used to
+   derive `k`** — which independently justifies measuring it, as §2 concludes.
+
+Best citation for the channel physics is now Fastie on the Raspberry Pi blog, which is
+clearer than either Public Lab note:
+
+> "The Rosco filter blocks most red light but passes the blue end of the spectrum and also
+> near infrared light. The blue channel will now capture visible blue light as usual (plus
+> some infrared) but there is no red light for the red channel to capture so it captures
+> mostly near infrared light."
 
 ---
 
-## 4. 🟠 Two picamera2 bugs that could silently invalidate every capture
+## 4. 🔴 The camera's image pipeline corrupts the index — partly fixed, one part can't be
 
-Search surfaced these two open issues in `raspberrypi/picamera2`. I could only see the
-titles, not the threads:
+This turned out to be the most serious finding of the whole review, and it is worse than
+the two bugs I originally listed. Locking AWB and AE is **not enough**. Several ISP stages
+keep running, are non-linear or per-channel, and one of them mixes the *green* channel —
+the one this rig treats as blocked — into both red and blue.
 
-- **#1269 — "[BUG] AeEnable control parameter is not respected"**
-- **#825 — "[BUG] color different (AWB, gain) not working"**
+### The colour correction matrix is the real problem
 
-Both land directly on this project's foundation. The entire premise of BNDVI here is that
-AWB and AE are **locked**; if either lock is silently ineffective on your Bookworm build,
-the camera is quietly re-gaining the channels and every number in every flight is
-meaningless — with no visible symptom.
+`ColourCorrectionMatrix` is *"the 3x3 matrix that converts camera RGB to sRGB … after
+pixels have been white-balanced, but before any gamma transformation"*. And per libcamera's
+own docs:
 
-**To close, two parts:**
+> If ColourTemperature is set (either directly, **or indirectly by setting ColourGains**)
+> but ColourCorrectionMatrix is not, the ColourCorrectionMatrix is updated based on the
+> ColourTemperature.
 
-1. Read the issues, check whether they affect your picamera2 version.
-2. **Test it on the rig regardless**, because this is cheap and definitive: point the
-   camera at a fixed scene, open **Debug**, and change the *scene brightness* (shade the
-   subject with your hand, or wait for a cloud). With AE/AWB genuinely locked, the
-   histogram should shift bodily brighter/darker but the **BNDVI mean should barely
-   move**. If the BNDVI mean stays pinned while the raw image brightness also stays
-   pinned, the camera is still auto-adjusting and the lock failed.
+So our `ColourGains: (1.0, 1.0)` — the thing that locks white balance — *causes* a CCM to
+be applied. Traced through `imx219.json`, gains of 1.0 resolve to a colour temperature of
+5536 K, which interpolates to:
 
-Related, and already applied in the code: the official picamera2 examples pass fixed
-controls into `create_still_configuration(controls=...)` rather than calling
-`set_controls()` after `start()` and hoping a 3-second sleep is enough. The old code did
-the latter. Worth knowing which pattern your version actually honours.
+```
+[  2.2861  -0.8375  -0.4485 ]
+[ -0.6552   2.6316  -0.9764 ]
+[ -0.2764  -0.5887   1.8651 ]
+```
+
+Look at the green column: **−0.84 into red and −0.59 into blue.** "R" and "B" are no longer
+NIR and visible blue; they're mixtures containing the channel we claim is unused. Modelling
+vegetation behind the gel through that matrix plus gamma 2.2:
+
+| true BNDVI | measured | class shift |
+|---|---|---|
+| +0.55 | +0.426 | healthy → healthy |
+| **+0.40** | **+0.294** | **healthy → moderate** |
+| **+0.35** | **+0.263** | **healthy → moderate** |
+| **+0.32** | **+0.246** | **healthy → moderate** |
+| +0.20 | +0.167 | moderate → moderate |
+| +0.10 | +0.098 | stressed → stressed |
+
+A misclassification band sitting right on the 0.3 boundary — and the error isn't a constant
+offset. Holding R and B fixed and varying green leak from 0 to 0.20 moves the measured value
+from 0.248 to 0.310.
+
+**And your own calibration cannot detect it.** The CCM's rows sum to 1.0 by construction, so
+it is white-preserving: a neutral card reads BNDVI = +0.00002 through it. `solve_leak_coef()`
+and the drag-a-box gesture will pass cleanly while vegetation readings are wrong. **A passing
+white-card calibration is not evidence the channels are clean.**
+
+### Three more stages that controls don't reach
+
+- **`rpi.contrast`** — `imx219.json` sets `ce_enable: 1`, so an adaptive tone curve is
+  restretched every frame from that frame's luminance histogram, on top of a 66-point gamma
+  curve. `Contrast: 1.0` only skips the *manual* contrast path. There is no control for it.
+- **`rpi.alsc`** — lens shading applies spatially varying, **per-channel** Cr/Cb gains
+  (16×12 tables, iterated). So BNDVI drifts across the frame independently of vegetation.
+  Worse: the shipped tables were calibrated for a stock IMX219 **with** its IR-cut filter,
+  which this rig doesn't have. `imx219_noir.json` doesn't help — it still ships full
+  `calibrations_Cr`/`calibrations_Cb` and `rpi.ccm`. No control disables it.
+- **`NoiseReductionMode`** — we never set it, and picamera2 injects *different* defaults for
+  stills (`HighQuality`) and previews (`Minimal`). So the saved capture and the live debug
+  feed were running different ISP configurations, which quietly undercut the "all seven
+  canvases come from one array so they can't drift" design property.
+
+### What was fixed
+
+`locked_controls()` now sets, filtered against `cam.camera_controls` so old stacks don't
+choke:
+
+```python
+"ExposureTimeMode": 1,   # Manual — see below, AeEnable is not enough
+"AnalogueGainMode": 1,   # Manual
+"NoiseReductionMode": 0, # Off — also fixes the still/preview mismatch
+"ColourCorrectionMatrix": (1,0,0, 0,1,0, 0,0,1),   # identity
+```
+
+Plus `neutral_tuning()`, on by default (**Settings → "Neutralise the image-processing
+pipeline"**), which loads `imx219_noir.json` as a dict via `Picamera2(tuning=...)` and
+neuters `rpi.ccm` (identity), `rpi.contrast` (`ce_enable: 0`, linear gamma), `rpi.alsc`
+(flat), `rpi.sharpen` and `rpi.sdn`. No root, no installed files.
+
+Plus `verify_controls()`, which compares capture metadata against what was requested. Every
+capture records a `control_check`, mismatches are shown at the top of the photo detail page,
+and the debug feed checks every frame and overrides the sanity note if a lock is being
+ignored. **This is the fix that would have caught the AeEnable bug automatically** — and it
+matters because `AeEnable` is deliberately absent from metadata, so you have to check the
+*values*, not the flag.
+
+### The AeEnable bug, properly diagnosed
+
+[picamera2 #1269](https://github.com/raspberrypi/picamera2/issues/1269) — open, **zero
+maintainer replies**. libcamera 0.5.0 redefined `AeEnable` as a wrapper pre-processed into
+the two `*Mode` controls, but only on the `queueRequest()` path — not `start()`. David
+Plowman's fix commit:
+
+> "In Camera::queueRequest() the control list is updated transparently by converting
+> AeEnable into ExposureTimeMode and AnalogueGainMode controls. However, this was not
+> happening during Camera::start(), meaning that setting AeEnable there was having no
+> effect."
+
+`Camera::start()` is exactly the path `create_*_configuration(controls=...)` uses. Affected:
+libcamera **0.5.0 and 0.5.1**; fixed from `0.5.1+rpt20250707`. Bookworm currently ships
+0.5.2+rpt20250903, so **you are past it** — but the widely-cited maintainer advice that
+*"setting ExposureTime and AnalogueGain will automatically disable the auto AGC/AEC"* is now
+**stale**. Current libcamera: *"This control will only take effect if ExposureTimeMode is
+Manual. If this control is set when ExposureTimeMode is Auto, the value will be ignored and
+will not be retained."* The old dict was safe only by accident, via an undocumented
+picamera2 shim. Now it's explicit.
+
+[#825](https://github.com/raspberrypi/picamera2/issues/825) — open since 2023, also zero
+maintainer replies, no documented workaround. The diagnosis is the CCM/contrast/ALSC
+mechanism above: the reporter's frame-to-frame colour cast with identical metadata is
+exactly what adaptive stages that don't appear in metadata look like.
+
+### What is still open 🔴
+
+**On Bookworm you cannot set the CCM via controls** — it's read-only until libcamera 0.6.0
+(Trixie). I bisected it:
+
+| libcamera | CCM settable | ships with |
+|---|---|---|
+| 0.5.0–0.5.2 | **no** | Bookworm |
+| 0.6.0–0.7.1 | yes | Trixie |
+
+So on a Pi 4 running Bookworm the identity-CCM control is silently dropped and you are
+relying entirely on the tuning override. That should work — but **none of it has been run
+against a camera**, so verify it on the bench:
+
+1. Take a capture, open its detail page, confirm **ISP neutralised: yes** and no control
+   mismatch warning.
+2. Do the shade test from CALIBRATION.md step 6. If the BNDVI mean moves when only the
+   illumination changes, something adaptive is still running.
+3. Ideally: photograph a colour target and check that a green patch doesn't move the R/B
+   ratio. That's the direct test for CCM contamination, and the one thing a white card can't
+   tell you.
+
+**The complete fix is to compute the index from the raw Bayer frame**, bypassing the ISP
+entirely. `capture_raw_dng()` already grabs it and saves the DNG, but `compute_bndvi()` still
+consumes the processed RGB. Doing it properly means subsampling the CFA for R and B pixels
+and subtracting black level (`imx219.json` has `rpi.black_level: 4096` on a 16-bit scale =
+64 in 10-bit; skipping it compresses the index toward zero). **I did not implement this** —
+writing an untested raw imaging pipeline and making it the default is a worse risk than the
+ISP contamination it fixes, and it needs a camera to validate. It is the right next step if
+you want defensible radiometry.
+
+### Smaller items, fixed
+
+- `create_still_configuration` defaults to `queue=True`, so `capture_array()` could return a
+  frame that completed *during warmup* — before the locked values took. Now `queue=False`
+  with `capture_request()`, which also gives us the metadata for verification.
+- `_capture_legacy()` set `shutter_speed` after `exposure_mode="off"` and won't run on
+  Bookworm at all. Left as a dead fallback, but it would produce unlocked frames if it ever
+  ran — don't rely on it.
+
+### Adjacent issues worth watching
+
+All open, none with visible maintainer replies:
+[#859](https://github.com/raspberrypi/picamera2/issues/859) (request for linear 12/16-bit
+ISP output; stated workaround is raw Bayer),
+[#1316](https://github.com/raspberrypi/picamera2/issues/1316) (OpenFlexure, pipeline order —
+answered above: CCM is *before* gamma),
+[#1103](https://github.com/raspberrypi/picamera2/issues/1103) (tuning file support not
+thread-safe — relevant, we now use a tuning dict),
+[#1341](https://github.com/raspberrypi/picamera2/issues/1341) (lens shading table
+intermittently not loaded),
+[#908](https://github.com/raspberrypi/picamera2/issues/908) (IMX219 auto-exposure never
+settles — moot once genuinely locked).
+
+There are no NDVI-specific issues or discussions in the repo at all.
 
 ---
 
@@ -129,12 +363,18 @@ defines the three **classes** (green / "latent stress" / red) but **never states
 numeric threshold**. The only numbers anywhere are Table 1's five illustrative sample
 rows — which are labelled as samples, not measurements.
 
-Interestingly, Table 1 is *roughly* consistent with the code's defaults (its "healthy
-vegetation" rows are 0.30 and 0.38; "slightly stressed" is 0.03; "water stress" is
-−0.33), so the defaults aren't unreasonable. But nothing in either the code or the paper
-derives them, and they're almost certainly not right for *Hylocereus* — dragon fruit is a
-cactus with thick waxy cladodes, whose NIR/blue reflectance is not going to behave like
-the leafy crops these generic NDVI thresholds come from.
+The defaults now at least have a source, which they didn't before. Chris Fastie, on the
+Public Lab note for **this exact rig**, gives
+[*"healthy plants with NDVI values 0.3 to 0.7, and non plants with NDVI below 0.2"*](https://publiclab.org/notes/carolccarvalho/07-15-2016/raspberry-noir-cam-blue-filter),
+and *"healthy plants between 0.2 and 0.8"* on the
+[Raspberry Pi blog](https://www.raspberrypi.com/news/whats-that-blue-thing-doing-here/).
+Table 1 in your paper is roughly consistent too (its "healthy vegetation" rows are 0.30
+and 0.38; "slightly stressed" 0.03; "water stress" −0.33).
+
+So `0.3 / 0.1` is defensible as a starting point rather than pulled from nowhere. **It is
+still generic vegetation, not dragon fruit.** *Hylocereus* is a cactus with thick waxy
+cladodes; its NIR/blue reflectance will not behave like the leafy crops those numbers come
+from, and nobody in these sources was looking at one.
 
 **To close — this is your Objective 4 validation, and it's the highest-value fieldwork:**
 
@@ -156,16 +396,22 @@ Table 1's healthy values of 0.30–0.38 are consistent with that, so don't expec
 
 ---
 
-## 6. 🟡 IMX219 spectral response / quantum efficiency
+## 6. 🟡 IMX219 spectral response / quantum efficiency — still open, and probably fine
 
-Sony does not publish QE curves for the IMX219 publicly, and I found nothing usable.
-Without it, the exact split of NIR between the red and blue Bayer pixels can't be derived
-from first principles — which is the other half of why `k` has to be measured rather than
-calculated.
+Sony does not publish QE curves for the IMX219, and with open network access I still found
+nothing sensor-specific. Without it, the split of NIR between red and blue Bayer pixels
+can't be derived from first principles — the other half of why `k` has to be measured.
 
-**To close:** probably can't be, cleanly. Some third parties have published measured
-IMX219 response curves; worth a search, but treat anything you find with care. Not a
-blocker — the empirical white-reference method sidesteps it entirely.
+One directional finding, from patent literature on NIR-sensitive imagers rather than this
+sensor: around 850 nm a Bayer colour filter array becomes largely transparent, so all
+pixels land in the same ballpark (~25% QE). That is *consistent* with meaningful leakage
+into blue, but it is not IMX219 data and it says nothing about 700–750 nm, which is where
+the Rosco #2007's passband actually opens (§3). Don't cite it as a number.
+
+**Verdict: leave this open.** It's the cleanest possible illustration of why the empirical
+route wins — between an uncharacterised sensor response and a filter curve that stops at
+740 nm, `k` is simply not derivable for this rig, and measuring it is the answer rather
+than a compromise.
 
 ---
 
@@ -195,16 +441,19 @@ Budget one debugging session for this. Field names and integer scaling (lat/lon 
 
 ---
 
-## 8. 🟠 Satellite tiles could not be downloaded
+## 8. ✅ RESOLVED — the offline map is downloaded and committed
 
-Every tile server is blocked here, so `static/tiles/` ships **empty**. The map falls back
-to plain sand-coloured tiles and the dashboard tells you so rather than showing a broken
-grid.
+Done through the dashboard's own downloader: **138 tiles, 1.9 MB, zoom 16–19**, centred on
+14.1265 N / 121.0768 E, detail to **29 cm per pixel** at zoom 19. Committed, so the Pi
+never needs the network for the basemap.
 
-**To close:** open **Settings → Offline map** on a machine with internet, confirm the
-centre, and click download. It shows the tile count and size before committing. For a
-620 m box (38 ha) at zoom 16–19 that's about 138 tiles / 2.4 MB — then commit them and
-the Pi never needs the network again.
+One thing the real imagery taught us: tiles sit on a fixed grid, so a 620 m box snaps
+outward to whole tiles and you actually get **54.9 ha**, not the 38.4 ha requested.
+Settings now reports both numbers, and the farm map draws the true coverage edge.
+
+To move or resize it — e.g. once you've read the real plot coordinates in the field —
+change the centre in **Settings → Offline map** and download again. Delete
+`hylocropter/static/tiles/` first if you want to drop the old area rather than accumulate.
 
 Also worth knowing: `DEPLOYMENT.md` originally suggested copying Mission Planner's
 prefetched tiles. **Don't bother** — Mission Planner stores them in a proprietary
@@ -277,15 +526,22 @@ flying.
 
 | # | Task | Where | Effort |
 |---|---|---|---|
-| 1 | Measure your own `k` against white paper | Debug view, no network needed | 10 min |
-| 2 | Verify the AWB/AE lock really holds (§4) | Debug view, on the rig | 10 min |
-| 3 | Download the offline map tiles | Settings, needs internet once | 5 min |
-| 4 | Test telemetry against ArduPilot SITL | laptop, no drone needed | 1 hour |
-| 5 | Derive real thresholds from ground truth | field + dashboard | a field session |
-| 6 | Read the two Public Lab notes, fix the `k` citation | any browser | 30 min |
-| 7 | Get the Rosco #2007 curve for the paper | any browser | 15 min |
-| 8 | Fix the in-flight/post-flight contradiction | the paper | 15 min |
-| 9 | Reconcile the barangay name | the paper | 5 min |
+| 1 | Confirm the ISP neutralising actually works (§4) | Debug view + a capture, on the rig | 20 min |
+| 2 | Verify the AWB/AE lock really holds — the shade test (§4) | Debug view, on the rig | 10 min |
+| 3 | Measure your own `k` — expect well below 0.8 (§2) | Debug view, on the rig | 10 min |
+| 4 | Test telemetry against ArduPilot SITL (§7) | laptop, no drone needed | 1 hour |
+| 5 | Derive real thresholds from ground truth (§5) | field + dashboard | a field session |
+| 6 | Set the plot centre from a real field reading (§9) | Settings | 5 min |
+| 7 | Fix the in-flight/post-flight contradiction (§10) | the paper | 15 min |
+| 8 | Reconcile the barangay name (§9) | the paper | 5 min |
+| 9 | Decide the OpenCV question (§10) | the paper, or ask me | 10 min |
 
-Items 1, 2 and 5 are the ones that decide whether the numbers mean anything. Everything
-else is polish or paperwork.
+**Do 1, 2 and 3 in that order, in one sitting on the bench** — they're the same twenty
+minutes with the camera, and until they pass every number the system produces is
+provisional. Item 5 is what turns this from a working system into a result. Everything else
+is polish or paperwork.
+
+**Now available for the writeup**, courtesy of the resolved sections: the full Rosco #2007
+transmission table (§3), the correct provenance and limits of the `B − k·R` correction
+(§2), a real citation for the 0.3/0.1 thresholds (§5), and Public Lab's actual two-target
+calibration procedure if an examiner pushes on radiometry (§2).

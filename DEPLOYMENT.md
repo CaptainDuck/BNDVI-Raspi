@@ -158,8 +158,16 @@ demo.
 - [ ] **Verify the AWB/AE lock actually holds.** Point at a fixed scene, then
       shade the subject with your hand. The histogram should shift bodily
       brighter/darker while the **BNDVI mean barely moves**. If the raw
-      brightness doesn't change either, the lock failed silently — see
-      RESEARCH-GAPS.md §4 for the two picamera2 bugs involved.
+      brightness doesn't change either, the lock failed silently. The dashboard
+      also checks every frame against the camera's own metadata and will say so —
+      see RESEARCH-GAPS.md §4.
+- [ ] **Confirm the ISP is neutralised.** Take a capture and check its detail page
+      says "ISP neutralised: yes" with no control-mismatch warning. This matters
+      more than it sounds: with the pipeline live, the colour-correction matrix
+      mixes green into both red and blue and produces a misclassification band
+      right at the 0.3 threshold — and a white card cannot detect it. This code
+      path has never run against a camera, so treat it as unverified until you've
+      checked. RESEARCH-GAPS.md §4.
 - [ ] Put a white card in frame, drag a box over it in Debug, hit **Solve k**.
       Confirm the card then reads BNDVI ≈ 0.
 - [ ] A known-healthy plant reads mean BNDVI **+0.3 to +0.7**. A negative value

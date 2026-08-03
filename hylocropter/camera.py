@@ -71,6 +71,7 @@ class CameraService:
         self._picam = None
         self._probe = None
         self._probe_at = 0.0
+        self._wanted = {}
         self._synthetic_override = dev_mode
         self._last_error = None
 
@@ -169,26 +170,39 @@ class CameraService:
 
         with self._lock:
             cam = self._open_locked()
-            frame = cam.capture_array("lores")
+            request = cam.capture_request()
+            try:
+                frame = request.make_array("lores")
+                metadata = request.get_metadata()
+            finally:
+                request.release()
         small = _downsample(frame)
+        # Check the locks on every frame. This is the cheap continuous version of
+        # the per-capture control_check, and it is what makes a silently ignored
+        # AE/AWB lock visible in the Debug view rather than invisible forever.
+        mismatches = bndvi.verify_controls(getattr(self, "_wanted", {}),
+                                           metadata or {})
         return (small[:, :, 0].astype(np.float32),
                 small[:, :, 2].astype(np.float32),
-                {"source": "camera"})
+                {"source": "camera", "mismatches": mismatches})
 
     def _open_locked(self):
         """Open picamera2 with the current locked controls. Caller holds _lock."""
         if self._picam is not None:
             return self._picam
-        from picamera2 import Picamera2
         s = self.settings
-        cam = Picamera2()
+        cam = bndvi.open_camera(
+            neutralise_isp=bool(s.get("neutralise_isp", True)))
+        # Same control set as a real capture, filtered to what this libcamera
+        # advertises. Using the identical dict is the point: the debug feed must
+        # show what a capture would record, not a differently-processed preview.
+        self._wanted = bndvi.locked_controls(
+            s.get("gain"), s.get("exposure_us"), tuple(s.get("colour_gains")),
+            available=cam.camera_controls)
         config = cam.create_preview_configuration(
             main={"size": (640, 480), "format": "RGB888"},
             lores={"size": (320, 240), "format": "RGB888"},
-            controls=bndvi.locked_controls(
-                s.get("gain"), s.get("exposure_us"),
-                tuple(s.get("colour_gains")),
-            ),
+            controls=self._wanted,
         )
         cam.configure(config)
         cam.start()

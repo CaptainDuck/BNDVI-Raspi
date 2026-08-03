@@ -81,6 +81,7 @@
       state.nir = buf.subarray(0, w * h);
       state.blue = buf.subarray(w * h, w * h * 2);
       state.source = res.headers.get('X-Frame-Source') || 'unknown';
+      state.mismatch = res.headers.get('X-Control-Mismatch') || null;
       state.seq = parseInt(res.headers.get('X-Frame-Seq'), 10) || 0;
       setFeedLabel();
       render();
@@ -299,7 +300,12 @@
     nirMean /= n; blueMean /= n;
 
     let note;
-    if (state.source === 'synthetic') {
+    if (state.mismatch) {
+      // Nothing else on this page matters if the camera is ignoring the locks.
+      note = 'The camera is not honouring the locked settings: ' +
+        state.mismatch + '. Until that is fixed every BNDVI number here is ' +
+        'meaningless — see RESEARCH-GAPS.md §4.';
+    } else if (state.source === 'synthetic') {
       note = 'Synthetic frames — no camera attached. The white square top-left ' +
         'is a simulated reference card, so you can try the calibration below.';
     } else if (nirMean > 245 || blueMean > 245) {

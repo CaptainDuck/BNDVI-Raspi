@@ -7,14 +7,23 @@ Camera   : Pi NoIR Camera v2 + bundled blue filter (Rosco Roscolux #2007)
 
 How it works
 -------------
-The Rosco #2007 blue filter:
-  - PASSES visible blue (~400-500 nm) and NIR (>700 nm)
-  - BLOCKS red (~550-700 nm)
+The Rosco #2007 blue filter, from Rosco's own Cinegel data sheet (10% overall
+transmission, -3.3 stops):
+  - PASSES visible blue -- peaks at 53% across 420-440 nm
+  - BLOCKS red          -- bottoms out at 2% across 640-660 nm
+  - PASSES NIR          -- climbs from 4% at 680 nm to 15% at 700, 42% at 720,
+                           67% at 740, and is still rising where the sheet ends
+  - LEAKS green         -- 8-18% between 500 and 560 nm, so "blocked" is an
+                           approximation, not a fact
 
 Behind the NoIR sensor (no IR-cut filter) the Bayer pattern then sees:
   - Red  Bayer pixels: NIR only            -> Red channel  ~ NIR
   - Blue Bayer pixels: visible blue + NIR  -> Blue channel ~ visible blue
   - Green Bayer pixels: mostly blocked     -> unused by the index
+
+Note the sheet stops at 740 nm, so it does not characterise the 750-900 nm range
+where the silicon actually collects most of its NIR. That is why the leakage
+coefficient k has to be measured rather than derived -- see below.
 
 So:
     BNDVI = (NIR - Blue) / (NIR + Blue)
@@ -79,10 +88,19 @@ DEFAULT_THRESHOLD_MODERATE = 0.1
 # approximate visible_blue as max(eps, B - k*R) where k is the NIR
 # responsivity ratio of the blue vs red Bayer pixels.
 #
-# CAUTION: 0.8 is widely quoted for this rig but its provenance could not be
-# verified, and it does not appear in the project thesis. Prefer measuring your
-# own k against a white reference -- solve_leak_coef() below does it in one
-# step, and the dashboard's Debug view wires it to a drag-a-box interaction.
+# The B - k*R form is Ned Horning's, from the Public Lab PhotoMonitoringPlugin
+# ("subtract a percentage of the NIR pixel values from the visible pixel
+# values"), and 0.8 is that plugin's hard-coded default (percentToSubtract=80.0).
+#
+# BUT 0.8 IS NOT A VALUE FOR THIS RIG. Horning's 80% is for a MidOpt DB660/850
+# narrowband red/NIR filter, with the channels the other way round, and he
+# justifies it by that filter "centering the NIR band at 850nm where the
+# sensitivity of the red detectors is roughly the same as the blue detectors".
+# The Rosco #2007 passes a *broad* NIR band from ~695nm, and Horning notes that
+# in exactly that case "the red detectors in the camera sensor are much more
+# sensitive to the shorter NIR wavelengths" -- so k here should be well below
+# 0.8. Measure your own: solve_leak_coef() does it from a white reference in one
+# step, and the Debug view wires it to a drag-a-box gesture.
 # See RESEARCH-GAPS.md section 2.
 DEFAULT_NIR_LEAK_COEF = 0.8
 
@@ -115,24 +133,176 @@ class CameraUnavailable(RuntimeError):
 # ── camera capture ────────────────────────────────────────────────────────────
 
 def locked_controls(gain=DEFAULT_GAIN, exposure_us=DEFAULT_EXPOSURE_US,
-                    colour_gains=DEFAULT_COLOUR_GAINS):
+                    colour_gains=DEFAULT_COLOUR_GAINS, available=None):
     """The control dict that pins the camera so BNDVI stays comparable.
 
-    Everything here exists to stop the ISP touching the channels
-    independently -- the index is a ratio between R and B, so any per-channel
-    automatic adjustment corrupts it.
+    Everything here exists to stop the ISP touching the channels independently --
+    the index is a ratio between R and B, so any per-channel automatic
+    adjustment corrupts it.
+
+    `available` is the camera's own control list (`cam.camera_controls`). Controls
+    that the installed libcamera doesn't advertise are dropped rather than
+    passed and ignored, because several of these only exist on newer stacks.
+
+    Read the notes below before simplifying any of it. Two of these lines look
+    redundant and are not.
     """
-    return {
-        "AwbEnable": False,                       # no auto white balance
-        "AeEnable": False,                        # no auto exposure/gain
-        "ColourGains": tuple(float(g) for g in colour_gains),  # pin AWB properly
-        "AnalogueGain": float(gain),
+    controls = {
+        # ── white balance ──────────────────────────────────────────────────
+        # AwbEnable alone only *freezes* AWB: libcamera's own comment is "Freeze
+        # the most recent values, and treat them as manual gains". Setting
+        # ColourGains is what makes it repeatable across boots -- and it also
+        # disables AWB by itself.
+        "AwbEnable": False,
+        "ColourGains": tuple(float(g) for g in colour_gains),
+
+        # ── exposure and gain ──────────────────────────────────────────────
+        # AeEnable is a convenience wrapper libcamera pre-processes into the two
+        # *Mode controls. In libcamera 0.5.0/0.5.1 that pre-processing was
+        # missing on the Camera::start() path -- which is exactly the path
+        # controls= in a configuration takes -- so AeEnable was silently dropped
+        # (picamera2 issue #1269). Set the modes explicitly and treat AeEnable as
+        # a fallback for older stacks that don't have them.
+        "AeEnable": False,
+        "ExposureTimeMode": 1,        # Manual
+        "AnalogueGainMode": 1,        # Manual
         "ExposureTime": int(exposure_us),
-        "Sharpness": 0.0,                         # sharpening is non-linear
+        "AnalogueGain": float(gain),
+
+        # ── ISP stages that are non-linear or per-channel ───────────────────
+        "Sharpness": 0.0,             # sharpening is non-linear
         "Brightness": 0.0,
         "Contrast": 1.0,
-        "Saturation": 1.0,                        # do not stretch channel ratios
+        "Saturation": 1.0,            # do not stretch channel ratios
+        # Spatial denoise is non-linear and spatially varying, and picamera2
+        # defaults it differently for stills (HighQuality) and previews
+        # (Minimal). Without this, the live debug feed and the saved capture run
+        # different ISP configurations.
+        "NoiseReductionMode": 0,      # Off
     }
+
+    # The colour correction matrix is the big one. Setting ColourGains implies a
+    # ColourTemperature, and libcamera then derives a CCM from it unless you
+    # supply one -- so "locked" white balance still hands you a 3x3 that mixes
+    # the GREEN channel into both R and B with weights around -0.6 to -0.8. That
+    # is the channel this rig treats as blocked and unused, and the resulting
+    # error is not a constant offset: it moves with how much green leaks through
+    # the gel. Identity keeps R and B as R and B.
+    #
+    # Only settable on libcamera >= 0.6.0 (Trixie). On Bookworm (0.5.2) it is
+    # read-only, and the options are a custom tuning file (see neutral_tuning())
+    # or the raw Bayer path. See RESEARCH-GAPS.md section 4.
+    controls["ColourCorrectionMatrix"] = (1.0, 0.0, 0.0,
+                                         0.0, 1.0, 0.0,
+                                         0.0, 0.0, 1.0)
+
+    if available is not None:
+        controls = {k: v for k, v in controls.items() if k in available}
+    return controls
+
+
+# Controls whose requested value we can compare against capture metadata.
+# AeEnable deliberately is not in metadata ("The AeEnable control is not
+# returned in metadata"), so verification checks the values, not the flag.
+_VERIFIABLE = ("ExposureTime", "AnalogueGain", "ColourGains",
+               "ColourCorrectionMatrix")
+
+
+def verify_controls(requested, metadata, tolerance=0.02):
+    """Compare what we asked the camera for against what it reports doing.
+
+    This is the check that catches a silently ignored lock. picamera2 issue
+    #1269 is precisely the case where the request looks right, the frame comes
+    back, and the exposure is whatever the auto algorithm chose -- with no error
+    anywhere. Comparing metadata is the only way to know.
+
+    Returns a list of human-readable mismatches, empty when everything took.
+    """
+    problems = []
+    if not metadata:
+        return problems
+    for key in _VERIFIABLE:
+        if key not in requested or key not in metadata:
+            continue
+        want, got = requested[key], metadata[key]
+        if isinstance(want, (tuple, list)):
+            if len(want) != len(got or ()):
+                problems.append(f"{key}: asked for {want}, camera reports {got}")
+                continue
+            if any(abs(float(a) - float(b)) > max(0.02, abs(float(a)) * tolerance)
+                   for a, b in zip(want, got)):
+                problems.append(f"{key}: asked for {tuple(round(float(v), 3) for v in want)}, "
+                                f"camera reports {tuple(round(float(v), 3) for v in got)}")
+        else:
+            want, got = float(want), float(got)
+            if abs(want - got) > max(1.0, abs(want) * tolerance):
+                problems.append(f"{key}: asked for {want:g}, camera reports {got:g}")
+    return problems
+
+
+def neutral_tuning(base="imx219_noir.json"):
+    """A tuning override that turns off the ISP stages controls can't reach.
+
+    `Picamera2(tuning=...)` accepts a dict, so this needs no root and no
+    installed files. It is the only way to neutralise the colour correction
+    matrix, the adaptive tone curve and lens shading on libcamera 0.5.x
+    (Bookworm), where ColourCorrectionMatrix is read-only.
+
+    What it disables, and why each one matters to a channel-ratio index:
+
+    * `rpi.ccm` -> identity. Otherwise green is mixed into R and B (see
+      locked_controls).
+    * `rpi.contrast` -> `ce_enable: 0` and a linear curve. imx219.json enables
+      contrast enhancement, which restretches the tone curve every frame from
+      that frame's luminance histogram. There is no control for it.
+    * `rpi.alsc` -> flat Cr/Cb. Lens shading applies spatially varying,
+      per-channel gains, so BNDVI drifts across the frame independently of
+      vegetation. Worse here: the shipped tables were calibrated for a stock
+      IMX219 *with* its IR-cut filter, which this rig does not have.
+    * `rpi.sharpen`, `rpi.sdn` -> off.
+
+    Returns None if the base tuning file can't be loaded, in which case the
+    caller should carry on unmodified rather than fail the capture.
+    """
+    try:
+        from picamera2 import Picamera2
+        tuning = Picamera2.load_tuning_file(base)
+    except Exception:
+        return None
+
+    def find(name):
+        for block in tuning.get("algorithms", []):
+            if name in block:
+                return block[name]
+        return None
+
+    ccm = find("rpi.ccm")
+    if ccm is not None:
+        identity = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        ccm["ccms"] = [{"ct": 2500, "ccm": list(identity)},
+                       {"ct": 8000, "ccm": list(identity)}]
+        ccm.pop("saturation", None)
+
+    contrast = find("rpi.contrast")
+    if contrast is not None:
+        contrast["ce_enable"] = 0
+        contrast["gamma_curve"] = [0, 0, 65535, 65535]   # linear
+
+    alsc = find("rpi.alsc")
+    if alsc is not None:
+        for key in list(alsc):
+            if key.startswith("calibrations_"):
+                alsc.pop(key)
+        alsc["luminance_strength"] = 0.0
+        for key in ("sigma", "sigma_Cr", "sigma_Cb"):
+            alsc.pop(key, None)
+
+    for name in ("rpi.sharpen", "rpi.sdn"):
+        block = find(name)
+        if block is not None:
+            block.clear()
+
+    return tuning
 
 
 def capture_image(
@@ -144,8 +314,15 @@ def capture_image(
     dev_mode=False,
     scene="mixed",
     jitter=0.0,
+    neutralise_isp=True,
+    report=None,
 ):
-    """Capture a still with AWB and AE locked. Returns (H, W, 3) uint8 RGB."""
+    """Capture a still with AWB and AE locked. Returns (H, W, 3) uint8 RGB.
+
+    `report` is an optional dict that gets filled with what the camera actually
+    reported doing, plus any mismatches against what we asked for. Never trust
+    the request alone -- see verify_controls().
+    """
     if dev_mode:
         return synthetic_frame(resolution, scene=scene, jitter=jitter)
 
@@ -161,22 +338,36 @@ def capture_image(
                 "synthetic frame)."
             )
 
-    cam = Picamera2()
+    cam = open_camera(neutralise_isp=neutralise_isp)
     try:
+        wanted = locked_controls(gain, exposure_us, colour_gains,
+                                 available=cam.camera_controls)
         # Controls go in the configuration, not a set_controls() call after
-        # start(). The official picamera2 examples do it this way and it removes
-        # the race where the first frames are captured before the locked values
-        # have actually been applied.
+        # start(). The official picamera2 manual is explicit that this way "the
+        # controls are applied before the camera even starts, meaning the very
+        # first camera frame will have the controls set as requested", whereas
+        # set_controls() after start() takes "several frames" to land.
+        #
+        # queue=False matters too: the default lets capture_array() hand back a
+        # frame that completed during warmup, i.e. before the locked values took.
         config = cam.create_still_configuration(
             main={"size": tuple(resolution), "format": "RGB888"},
-            controls=locked_controls(gain, exposure_us, colour_gains),
+            controls=wanted,
+            queue=False,
         )
         cam.configure(config)
         cam.start()
         # Still worth a short settle even with controls pre-applied: the sensor's
         # analogue chain needs a few frames to reach the requested exposure.
         time.sleep(max(0.0, warmup_s))
-        return cam.capture_array("main")
+        request = cam.capture_request()
+        try:
+            frame = request.make_array("main")
+            metadata = request.get_metadata()
+        finally:
+            request.release()
+        _fill_report(report, wanted, metadata, cam, neutralise_isp)
+        return frame
     finally:
         try:
             cam.stop()
@@ -185,10 +376,51 @@ def capture_image(
         cam.close()
 
 
+def open_camera(neutralise_isp=True):
+    """Open picamera2, optionally with the ISP stages controls can't reach off.
+
+    Falls back to a plain open if the tuning override can't be built, because a
+    capture with a slightly dirty ISP beats no capture at all.
+    """
+    from picamera2 import Picamera2
+    if neutralise_isp:
+        tuning = neutral_tuning()
+        if tuning is not None:
+            try:
+                return Picamera2(tuning=tuning)
+            except Exception:
+                pass
+    return Picamera2()
+
+
+def _fill_report(report, wanted, metadata, cam, neutralise_isp):
+    if report is None:
+        return
+    problems = verify_controls(wanted, metadata or {})
+    report["requested"] = {k: _plain(v) for k, v in wanted.items()}
+    report["reported"] = {k: _plain(metadata.get(k)) for k in _VERIFIABLE
+                          if metadata and k in metadata}
+    report["mismatches"] = problems
+    report["isp_neutralised"] = bool(neutralise_isp)
+    report["ccm_settable"] = "ColourCorrectionMatrix" in (cam.camera_controls or {})
+    return report
+
+
+def _plain(value):
+    if isinstance(value, (tuple, list)):
+        return [round(float(v), 4) for v in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return round(float(value), 4)
+    return value
+
+
 def capture_raw_dng(dng_path, resolution=DEFAULT_RESOLUTION,
                     gain=DEFAULT_GAIN, exposure_us=DEFAULT_EXPOSURE_US,
                     colour_gains=DEFAULT_COLOUR_GAINS,
-                    warmup_s=DEFAULT_WARMUP_S):
+                    warmup_s=DEFAULT_WARMUP_S, neutralise_isp=True,
+                    report=None):
     """Capture RGB and also save the unprocessed Bayer frame as DNG.
 
     Why bother: JPEG/RGB output is gamma-encoded, and gamma is a per-channel
@@ -197,16 +429,19 @@ def capture_raw_dng(dng_path, resolution=DEFAULT_RESOLUTION,
     raw frame is the honest input. Returns (rgb_array, dng_filename_or_None).
     """
     try:
-        from picamera2 import Picamera2
+        import picamera2  # noqa: F401  (checked here so the error is clear)
     except ImportError:
         raise CameraUnavailable("picamera2 is required for raw DNG capture.")
 
-    cam = Picamera2()
+    cam = open_camera(neutralise_isp=neutralise_isp)
     try:
+        wanted = locked_controls(gain, exposure_us, colour_gains,
+                                 available=cam.camera_controls)
         config = cam.create_still_configuration(
             main={"size": tuple(resolution), "format": "RGB888"},
             raw={},
-            controls=locked_controls(gain, exposure_us, colour_gains),
+            controls=wanted,
+            queue=False,
         )
         cam.configure(config)
         cam.start()
@@ -214,6 +449,7 @@ def capture_raw_dng(dng_path, resolution=DEFAULT_RESOLUTION,
         buffers, metadata = cam.switch_mode_and_capture_buffers(
             config, ["main", "raw"])
         rgb = cam.helpers.make_array(buffers[0], config["main"])
+        _fill_report(report, wanted, metadata, cam, neutralise_isp)
         try:
             cam.helpers.save_dng(buffers[1], metadata, config["raw"],
                                  str(dng_path))
@@ -408,16 +644,31 @@ def compute_bndvi(rgb_array, correct_nir_leakage=False,
 
 
 def solve_leak_coef(nir_mean, blue_mean):
-    """Derive k from a white reference, where BNDVI should read ~0.
+    """Derive k from a white reference, assuming it should read BNDVI ~ 0.
 
     A white/grey target reflects roughly equally across NIR and visible, so a
-    correctly corrected rig reads BNDVI = 0 on it. That means nir == vis:
+    corrected rig reads about 0 on it. Setting nir == vis:
 
         R = B - k*R   ->   k = B/R - 1
 
     Returns (k, message). k is None when no positive coefficient can work,
     which happens when B <= R on the reference -- i.e. the red channel is
     over-responding. The fix then is less exposure or gain, not a bigger k.
+
+    Caveats worth knowing, because this is a shortcut rather than a calibration:
+
+    * "Equally" is approximate. Horning's measured printer paper is 0.867 at
+      660nm vs 0.900 at 850nm, a true NDVI of about +0.02, and office paper
+      contains optical brighteners that specifically lift *blue* reflectance --
+      which is the band we compare against. Both push the solved k slightly high.
+    * With one target you cannot separate gain from offset, so this k absorbs any
+      per-channel gain asymmetry along with the physical leakage. It is a
+      rig-and-settings fudge factor that makes your own numbers self-consistent,
+      not a physical responsivity ratio.
+    * Public Lab's actual procedure is a linear regression of reflectance on
+      pixel value using at least a bright *and* a dark characterised target. If
+      you need defensible radiometry rather than a working demo, do that instead
+      -- see CALIBRATION.md.
     """
     if nir_mean <= 0:
         return None, ("The reference area reads black in the NIR channel. Point "
@@ -620,6 +871,7 @@ def capture_and_analyse(
     threshold_moderate=DEFAULT_THRESHOLD_MODERATE,
     save_array=False,
     capture_format="rgb888",
+    neutralise_isp=True,
     flight_id=None,
     geo=None,
     trigger="manual",
@@ -635,6 +887,7 @@ def capture_and_analyse(
     capture_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     started = time.time()
     dng_name = None
+    control_report = {}
 
     if rgb is None:
         if capture_format == "raw_dng" and not dev_mode:
@@ -646,9 +899,12 @@ def capture_and_analyse(
                 colour_gains=cam_kwargs.get("colour_gains",
                                             DEFAULT_COLOUR_GAINS),
                 warmup_s=cam_kwargs.get("warmup_s", DEFAULT_WARMUP_S),
+                neutralise_isp=neutralise_isp,
+                report=control_report,
             )
         else:
-            rgb = capture_image(dev_mode=dev_mode, **cam_kwargs)
+            rgb = capture_image(dev_mode=dev_mode, neutralise_isp=neutralise_isp,
+                                report=control_report, **cam_kwargs)
 
     settings = {
         "resolution": [int(rgb.shape[1]), int(rgb.shape[0])],
@@ -667,6 +923,7 @@ def capture_and_analyse(
         "threshold_healthy": float(threshold_healthy),
         "threshold_moderate": float(threshold_moderate),
         "capture_format": capture_format,
+        "neutralise_isp": bool(neutralise_isp) and not dev_mode,
     }
 
     bndvi = compute_bndvi(rgb, correct_nir_leakage=correct_nir_leakage,
@@ -696,6 +953,10 @@ def capture_and_analyse(
         "trigger": trigger,
         "channels": channel_means(rgb),
         "exposure_check": exposure_warning(rgb),
+        # What the camera reported doing, and whether it matches what we asked.
+        # A silently ignored lock is the worst failure mode this rig has, so it
+        # gets recorded per capture rather than trusted.
+        "control_check": control_report or None,
         "process_ms": int((time.time() - started) * 1000),
     }
 

@@ -13,8 +13,8 @@ Group 8 · Dimayuga, Ilag, Virtucio · De La Salle Lipa · CpE Design and Practi
 ## How it works
 
 The Pi NoIR sensor has no IR-cut filter, so it sees both visible and NIR. The
-bundled Rosco #2007 ("Storaro Blue") gel **passes blue + NIR and blocks
-red/green**, so the channels stop meaning what their names say:
+bundled Rosco #2007 ("Storaro Blue") gel passes blue and NIR while blocking red,
+so the channels stop meaning what their names say:
 
 | Channel       | What it actually captures              |
 |---------------|----------------------------------------|
@@ -27,6 +27,21 @@ So `BNDVI = (NIR − Blue) / (NIR + Blue) = (R − B) / (R + B)`.
 Healthy leaves reflect NIR strongly and absorb blue, so stress shows up as
 BNDVI falling.
 
+From Rosco's own Cinegel data sheet for #2007 (10% overall transmission, −3.3
+stops), the numbers behind that table:
+
+| Band | Transmission |
+|---|---|
+| Blue peak | **53%** at 420–440 nm |
+| Green | 18% at 500 nm falling to 8% at 560 nm — leaks, not blocked |
+| Red minimum | **2%** at 640–660 nm |
+| NIR cut-on | 4% at 680 nm → 15% at 700 → 42% at 720 → **67% at 740** and still rising |
+
+Two things worth noting. Green is only *mostly* blocked — at ~1/5 of peak blue
+it's a real if unused leak. And the data sheet stops at 740 nm, so it doesn't
+characterise the 750–900 nm range where the silicon collects most of its NIR;
+that's why the leakage coefficient has to be measured rather than derived.
+
 > **Sanity check:** pointing at healthy vegetation must produce a
 > **pinkish/magenta** raw image, because plants reflect a lot of NIR and that
 > lands in the red channel. If it looks like a normal colour photo, auto white
@@ -37,11 +52,24 @@ BNDVI falling.
 Blue Bayer pixels also pick up NIR. To remove that contamination we estimate
 visible blue as `max(ε, B − k·R)` before computing the index.
 
-`k = 0.8` is widely quoted for this rig, but **that value's provenance could not
-be verified and it does not appear in the thesis** — see
-[RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §2. Don't trust it: measure your own.
-Open **Debug**, put a white card in frame, drag a box over it, and the dashboard
-solves `k = B/R − 1` directly, because a white reference must read BNDVI ≈ 0.
+That form is Ned Horning's, from Public Lab's
+[PhotoMonitoringPlugin](https://publiclab.org/notes/nedhorning/07-22-2015/introducing-the-calibration-plugin-for-imagej-fiji)
+— "subtract a percentage of the NIR pixel values from the visible pixel values"
+— and `k = 0.8` is that plugin's hard-coded default.
+
+**But 0.8 is not a value for this rig.** Horning's 80% is for a MidOpt DB660/850
+narrowband *red* filter with the channels the other way round, and he justifies
+it by that filter "centering the NIR band at 850nm where the sensitivity of the
+red detectors is roughly the same as the blue detectors". The Rosco #2007 passes
+a broad NIR band from ~695 nm, and Horning says of exactly that case that "the
+red detectors in the camera sensor are much more sensitive to the shorter NIR
+wavelengths" — so `k` here should be **well below 0.8**.
+
+So measure your own. Open **Debug**, put a white card in frame, drag a box over
+it, and the dashboard solves `k = B/R − 1` from requiring BNDVI ≈ 0 on white.
+That's a shortcut rather than a calibration — see
+[RESEARCH-GAPS.md](./RESEARCH-GAPS.md) §2 for its biases and what Public Lab
+actually prescribes instead.
 
 ## The dashboard
 
@@ -136,10 +164,16 @@ from the Debug view rather than a text editor.
 
 ## Known gaps
 
-**[RESEARCH-GAPS.md](./RESEARCH-GAPS.md)** lists what could not be verified and
-how to close each item — including the unsourced `k = 0.8`, the absence of
-dragon-fruit-specific thresholds, two picamera2 bugs that could silently defeat
-the AWB/AE lock, and the fact that the MAVLink code has never been run against
+**[RESEARCH-GAPS.md](./RESEARCH-GAPS.md)** tracks what is and isn't verified,
+with how to close each remaining item.
+
+Resolved there, and useful for the writeup: the correct provenance and limits of
+the `B − k·R` correction, the full Rosco #2007 transmission table, and a real
+citation for the 0.3/0.1 thresholds.
+
+Still open: no dragon-fruit-specific thresholds (that's your Objective 4
+validation and the highest-value fieldwork left), two picamera2 bugs that could
+silently defeat the AWB/AE lock, and the MAVLink path never having run against
 real hardware.
 
 ## File layout
