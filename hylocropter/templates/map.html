@@ -8,15 +8,28 @@
 
 {% block content %}
 {% if not flight %}
-  {# First boot: nothing flown yet. Send them to Debug, because testing the
-     camera is genuinely the right first step. #}
-  <div class="card elev-sm empty">
-    <div class="empty-mark"></div>
-    <h3 style="margin:0">Nothing has been flown yet</h3>
-    <p>After the first flight, the farm map will fill in with colour showing
-      which plants are doing well and which need a look.</p>
-    <a class="btn btn-primary" href="{{ url_for('page_debug') }}">Test the camera first</a>
+  {# First boot: nothing flown yet. The map still renders, because the useful
+     thing to do before the first flight is to go and *find* the farm on the
+     satellite imagery — the downloaded vicinity is a whole neighbourhood and the
+     exact rows aren't known yet. This page used to be a dead end. #}
+  <div class="row hc-noprint" style="margin-bottom:16px">
+    <div class="grow">
+      <h2 style="margin:0 0 2px">Find the farm</h2>
+      <p class="page-sub">Nothing has been flown yet. Look around the satellite
+        view, then mark the block you want the drone to survey.</p>
+    </div>
+    <a class="btn btn-secondary" href="{{ url_for('page_debug') }}">Test the camera</a>
+    <a class="btn btn-primary" href="{{ url_for('page_new_flight') }}">Start a flight</a>
   </div>
+
+  {% if not cfg.setup_completed %}
+    <p class="text-muted hc-noprint" style="font-size:13px;margin:-8px 0 12px">
+      Not set up yet? The
+      <a href="{{ url_for('page_setup') }}">camera walkthrough</a> explains what
+      needs calibrating before the numbers mean anything.</p>
+  {% endif %}
+
+  {% include "_partials/mapframe.html" %}
 
   {% if ground_captures %}
     <h3 class="section-h">Ground captures</h3>
@@ -59,41 +72,7 @@
     </div>
   {% endif %}
 
-  <div class="card elev-sm map-card">
-    <div class="map-frame">
-      <div id="plot-map"
-           data-flight='{{ flight|tojson }}'
-           data-coverage='{{ coverage|tojson }}'
-           data-plot='{{ {"lat": cfg.plot_lat, "lon": cfg.plot_lon,
-                          "box_m": cfg.plot_box_m}|tojson }}'></div>
-      <div class="map-overlay-panel map-legend hc-noprint">
-        <span class="map-legend-title">Plant stress</span>
-        {% set s = flight.stats or {} %}
-        <div class="legend-row">
-          <span class="legend-swatch" style="background:var(--stress-healthy)"></span>
-          <span>Doing well</span>
-          <span class="legend-share">{{ '%.0f'|format(s.healthy_pct or 0) }}%</span>
-        </div>
-        <div class="legend-row">
-          <span class="legend-swatch" style="background:var(--stress-moderate)"></span>
-          <span>Keep an eye</span>
-          <span class="legend-share">{{ '%.0f'|format(s.moderate_pct or 0) }}%</span>
-        </div>
-        <div class="legend-row">
-          <span class="legend-swatch" style="background:var(--stress-stressed)"></span>
-          <span>Needs a look</span>
-          <span class="legend-share">{{ '%.0f'|format(s.stressed_pct or 0) }}%</span>
-        </div>
-      </div>
-      <div class="map-overlay-panel map-modes hc-noprint" role="group" aria-label="Overlay style">
-        <button class="map-mode is-active" data-mode="smooth">Smooth</button>
-        <button class="map-mode" data-mode="bands">Three colours</button>
-      </div>
-    </div>
-    <div class="map-hint" id="map-hint">
-      Move over the field to check one spot. Pinch or scroll to zoom.
-    </div>
-  </div>
+  {% include "_partials/mapframe.html" %}
 
   <div class="grid grid-cards" style="margin-top:16px">
     {% if summary %}
@@ -170,7 +149,7 @@
             if cfg.correct_nir_leakage else 'off' }}.
           {% if not flight.bounds %}
             <br><strong>No GPS on these photos</strong>, so they could not be placed
-            on the map — the overlay shows the plot outline only.
+            on the map — the overlay shows the flight outline only.
           {% endif %}
         </div>
       </div>

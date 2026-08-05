@@ -375,7 +375,9 @@
     <h3 style="margin:0">Where the farm is, and the drone link</h3>
 
     <p>The Pi has no internet in the field, so the satellite map has to be
-      downloaded once, ahead of time, for your plot only.</p>
+      downloaded once, ahead of time. It covers a whole <em>vicinity</em> rather
+      than just the farm — enough ground that you can find the rows on the
+      imagery even if you don't know the exact coordinates yet.</p>
 
     <div class="kv">
       {{ kv('Offline map', coverage.extent_label ~ ' · ' ~ coverage.size_label
@@ -390,9 +392,12 @@
         <a class="btn btn-primary" href="{{ url_for('page_settings') }}">Download the map in Settings</a>
       </div>
     {% else %}
-      <p>Already downloaded. If you move the plot centre later — for example once
-        you've stood in the field and read the real coordinates — re-download from
-        Settings.</p>
+      <p>Already downloaded. Next: open the
+        <a href="{{ url_for('page_map') }}">farm map</a>, find the dragon fruit
+        rows on the satellite view, and mark the block you want surveyed — that's
+        what the mission planner sizes the flight to. If the farm turns out to sit
+        outside this imagery, move the vicinity centre in Settings and
+        re-download.</p>
       <div id="setup-map" style="height:200px;border-radius:18px;overflow:hidden"></div>
     {% endif %}
 

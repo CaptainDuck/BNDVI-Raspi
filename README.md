@@ -86,8 +86,8 @@ that you never need a terminal.
 | View | What it does |
 |---|---|
 | **Set up the camera** | Guided calibration walkthrough — see below |
-| **Farm map** | Satellite basemap with the flight's BNDVI overlay, a three-band legend, per-cell hover readout, plain-language summary, trend against previous flights, and the flight's photos |
-| **New flight** | Pre-flight checklist (camera, storage, MAVLink, GPS fix, mission), mission details read live off the Pixhawk, trigger source, then live telemetry while recording |
+| **Farm map** | Satellite basemap with four ways to see a flight — every photo drawn at the ground it actually covers, an averaged grid, three bands, or imagery alone — plus photo pins, the flight track, a per-cell hover readout, plain-language summary and trend. Before the first flight it's where you find the farm on the imagery and mark the block to survey |
+| **New flight** | Pre-flight checklist (camera, storage, MAVLink, GPS fix, mission), mission details read live off the Pixhawk, a mission planner that turns an altitude into the two numbers Mission Planner needs, trigger source, then live telemetry while recording |
 | **Processing** | Post-landing progress: aggregate, map, save |
 | **All flights** | Every flight, grouped by month, searchable and filterable by block |
 | **Photo detail** | False colour / heatmap / raw, statistics, channel means, capture settings, GPS |
@@ -162,10 +162,46 @@ vendored into `hylocropter/static/`. The satellite basemap has to be downloaded
 once: **Settings → Offline map**, which shows the tile count and size before you
 commit and then reports exactly how far coverage extends.
 
-Imagery for the Tanauan plot is already downloaded and committed: **138 tiles,
-1.9 MB, zoom 16–19**, covering 54.9 ha at up to 29 cm per pixel. To move or resize
-it — once you've stood in the field and read the real coordinates — change the
+Imagery for the Tanauan **vicinity** is already downloaded and committed: **138
+tiles, 1.9 MB, zoom 16–19**, covering 54.9 ha at up to 29 cm per pixel.
+
+That 54.9 ha is deliberately much larger than anything the drone flies. It is
+ground to *search*, because the farm's exact outline near Vis Compound isn't known
+yet. Two areas, kept separate everywhere in the UI:
+
+| | What it is | Where you set it |
+|---|---|---|
+| **Vicinity** | The imagery on the Pi's disk. Tens of hectares. | Settings → Offline map |
+| **Survey block** | The one or two hectares the drone actually flies. | Farm map → *Mark the block you fly* |
+
+Open the farm map, pan around the satellite view until you recognise the dragon
+fruit rows, and click to mark the block. Everything the mission planner says —
+altitude, photo spacing, photo count, flight time, storage — is scaled to that
+block. Unmarked, it plans against a placeholder and says so.
+
+If the farm turns out to lie outside the downloaded imagery, move the vicinity
 centre in Settings and download again.
+
+## Planning the mission
+
+**New flight → Planning the mission** works the two numbers out from the lens
+geometry (62.2° × 48.8°, so `2·h·tan(fov/2)`) rather than a rule of thumb:
+
+| Altitude | Each photo covers | `CAM_TRIGG_DIST` | Line spacing | Detail |
+|---|---|---|---|---|
+| 8 m | 9.7 × 7.3 m | 4.4 m | 6.8 m | 0.29 cm/px |
+| **12 m** | **14.5 × 10.9 m** | **6.5 m** | **10.1 m** | **0.44 cm/px** |
+| 20 m | 24.1 × 18.1 m | 10.9 m | 16.9 m | 0.73 cm/px |
+| 30 m | 36.2 × 27.2 m | 16.3 m | 25.3 m | 1.10 cm/px |
+
+At 40% overlap along the line and 30% between lines. Those defaults are modest on
+purpose: photos are placed by telemetry, not stitched into a true orthomosaic, so
+they need only enough overlap to survive GPS wander. Raise both to 70–80% if you
+ever switch to real photogrammetry.
+
+The card also warns when a plan doesn't fit a battery. A 1 ha block at 12 m is
+170 photos and about 6 minutes; the whole 54.9 ha vicinity would be 1600 photos
+and an hour, which is five packs — hence the two areas being separate.
 
 ## Calibration
 
@@ -182,7 +218,7 @@ you cannot spot by eye:
 6. **Leakage measured** — solves your own `k` from the same box
 7. **Bands chosen** — where green becomes yellow becomes red
 8. **Plant checked** — point at a healthy plant, confirm +0.3 to +0.7
-9. **Farm map** — offline imagery and the drone link
+9. **Farm map** — offline imagery, marking the block, and the drone link
 
 It runs on synthetic frames too, so you can walk the whole flow before you're at
 the rig. Resumable, and re-runnable from Settings.
@@ -212,6 +248,8 @@ real hardware.
 ├── RESEARCH-GAPS.md              open questions and unverified claims
 ├── CLAUDE.md                     notes for future Claude Code sessions
 ├── Requirements.md               course assignment brief
+├── pytest.ini                    test config (runs from anywhere)
+├── .github/workflows/verify.yml  CI: the whole suite in one job
 ├── ndvi_capture.old.py           archived original — REFERENCE ONLY,
 │                                   has a channel-mapping bug, do not run
 └── hylocropter/
@@ -224,6 +262,7 @@ real hardware.
     ├── tiles.py                  offline basemap prefetch + coverage
     ├── applog.py                 logging + the in-UI log buffer
     ├── app.py                    Flask routes
+    ├── tests/                    pytest — index maths, mapping, store, routes
     ├── templates/                Jinja, one file per view (setup.html is the
     │                               guided calibration walkthrough)
     ├── static/
@@ -235,8 +274,30 @@ real hardware.
     └── hylocropter_data/         runtime state (created on first run)
 ```
 
-There is **no test suite or linter** — this is a student project. The Playwright
-verification used during development is described in DEPLOYMENT.md.
+## Tests
+
+```bash
+pip install -r hylocropter/requirements-dev.txt
+pytest
+```
+
+152 tests, about 11 seconds, no hardware needed:
+
+| File | What it pins down |
+|---|---|
+| `test_index.py` | The plant-health maths. That NIR is the **red** channel and healthy foliage reads positive; that the bands have no gap or overlap at the thresholds; that a `k` solved off a white card actually zeroes that card; that the gel-missing check catches a missing gel; and that `colormap.js` still matches `BNDVI_COLOR_STOPS` |
+| `test_mapping.py` | Photo → footprint → bounds → grid → mission plan. Including the two rules that keep the map honest: **unvisited cells stay `null`**, and **row 0 is the northern edge** |
+| `test_store.py` | The JSON indexes under concurrent writes, legacy migration, settings clamping, the survey block being nullable |
+| `test_routes.py` | Every page renders with no camera and no drone, and `/api/*` errors return JSON |
+
+`.github/workflows/verify.yml` runs all of that in **one job**, plus four things
+pytest can't: `bndvi.py` in a venv with Flask absent, the working directory
+staying irrelevant, the app booting through `__main__`, and greps for a CDN
+reference or a reintroduced `(B − R)/(B + R)`.
+
+**What CI cannot prove:** the camera path and the MAVLink path. Those still need a
+bench run — see DEPLOYMENT.md and RESEARCH-GAPS.md §7. UI behaviour is checked by
+hand with the Playwright script described in DEPLOYMENT.md.
 
 ## References
 

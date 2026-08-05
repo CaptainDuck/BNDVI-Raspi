@@ -30,6 +30,11 @@ DEFAULTS = {
     "resolution": list(bndvi.DEFAULT_RESOLUTION),
     "colour_gains": list(bndvi.DEFAULT_COLOUR_GAINS),
     "capture_format": "rgb888",          # or "raw_dng"
+    # Pi Camera v2 (IMX219, 3.04 mm lens) angle of view, per Raspberry Pi's specs.
+    # Used to work out how much ground each photo covers: at 12 m altitude that
+    # is about 14.5 x 10.9 m. Change these if you fit a different lens.
+    "fov_h_deg": 62.2,
+    "fov_v_deg": 48.8,
     # Load a tuning override that turns off the ISP stages no control can reach:
     # the colour correction matrix (which otherwise mixes GREEN into both R and
     # B), the adaptive tone curve, and per-channel lens shading. On by default
@@ -48,12 +53,27 @@ DEFAULTS = {
     "preview_fps": 12,
     "preview_scene": "mixed",            # synthetic scene when no camera
 
-    # ── the farm ──────────────────────────────────────────────────────────
-    # Brgy. Altura Bata, Tanauan City, Batangas. Change from the map -- see
+    # ── the vicinity ──────────────────────────────────────────────────────
+    # This is the area of satellite imagery downloaded for offline use, NOT the
+    # area the drone flies. It is deliberately large: the farm is somewhere near
+    # Vis Compound, Brgy. Altura Bata, Tanauan City, and its exact outline is not
+    # known yet, so there has to be enough imagery to go looking on. See
     # RESEARCH-GAPS.md section 9 about the Bilog-bilog / Altura Bata mismatch.
+    #
+    # The keys keep their old `plot_` names so existing settings.json files still
+    # load; only the meaning in the UI was ever "the plot", and that was wrong.
     "plot_lat": 14.1265,
     "plot_lon": 121.0768,
-    "plot_box_m": 620,                   # ~38 ha, comfortable around a 10 ha plot
+    "plot_box_m": 620,                   # ~38 ha of imagery to search within
+
+    # ── the survey block ──────────────────────────────────────────────────
+    # The patch inside that vicinity the drone actually flies. Unknown until the
+    # operator finds the farm on the imagery and marks it, which is why the
+    # centre is null rather than a guess -- a made-up centre would silently plan
+    # a mission over the wrong ground.
+    "survey_lat": None,
+    "survey_lon": None,
+    "survey_side_m": 100,                # 1 ha; a sane first block, not the farm
     "farm_name": "Dragon fruit farm",
     "farm_location": "Tanauan, Batangas",
     "blocks": ["North block", "South block", "East trellises", "West rows",
@@ -88,12 +108,17 @@ _LIMITS = {
     "gain": (1.0, 16.0),
     "warmup_s": (0.0, 10.0),
     "nir_leak_coef": (0.0, 2.0),
+    "fov_h_deg": (10.0, 180.0),
+    "fov_v_deg": (10.0, 180.0),
     "threshold_healthy": (-0.9, 0.95),
     "threshold_moderate": (-0.95, 0.9),
     "preview_fps": (1, 24),
     "plot_lat": (-90.0, 90.0),
     "plot_lon": (-180.0, 180.0),
     "plot_box_m": (100, 4000),
+    "survey_lat": (-90.0, 90.0),
+    "survey_lon": (-180.0, 180.0),
+    "survey_side_m": (10, 2000),
     "trigger_distance_m": (1, 200),
     "trigger_interval_s": (1, 120),
     "mavlink_baud": (1200, 921_600),
@@ -101,9 +126,16 @@ _LIMITS = {
     "tile_zoom_max": (10, 21),
 }
 
-_INTS = {"exposure_us", "preview_fps", "plot_box_m", "trigger_distance_m",
-         "trigger_interval_s", "mavlink_baud", "tile_zoom_min", "tile_zoom_max",
-         "setup_step"}
+_INTS = {"exposure_us", "preview_fps", "plot_box_m", "survey_side_m",
+         "trigger_distance_m", "trigger_interval_s", "mavlink_baud",
+         "tile_zoom_min", "tile_zoom_max", "setup_step"}
+
+# Settings whose default is None and which stay None until something real is
+# known. Clearing one back to "unknown" is a legitimate edit -- the survey block
+# has to be un-markable again once the operator realises they marked the wrong
+# field -- so null passes validation instead of being coerced to the string
+# "None", which is what the generic float path would do.
+_NULLABLE = {"survey_lat", "survey_lon"}
 
 _lock = threading.Lock()
 
@@ -169,7 +201,7 @@ class Settings:
             except (TypeError, ValueError):
                 warnings.append(f"'{key}' must be like {DEFAULTS[key]!r}")
                 continue
-            if key in _LIMITS:
+            if key in _LIMITS and value is not None:
                 lo, hi = _LIMITS[key]
                 clamped = min(max(value, lo), hi)
                 if clamped != value:
@@ -198,6 +230,10 @@ class Settings:
 
     def _coerce(self, key, raw):
         default = DEFAULTS[key]
+        if key in _NULLABLE:
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                return None
+            return float(raw)
         if key == "resolution":
             if isinstance(raw, str) and "x" in raw.lower().replace("×", "x"):
                 w, h = raw.lower().replace("×", "x").split("x")

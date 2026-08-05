@@ -42,6 +42,12 @@ BOUNDS_PAD_M = 25.0
 # Fallback half-size when a flight has one capture, or none with GPS.
 BOUNDS_MIN_M = 60.0
 
+# "Every capture, whatever flight it belongs to" -- distinct from None, which is a
+# real stored value meaning "this capture belongs to no flight" (a ground capture,
+# or anything migrated from the old dashboard). Using None for both meant asking
+# for ground captures quietly returned all of them.
+ALL = object()
+
 
 class Store:
     """Owns hylocropter_data/: the two indexes and the per-flight directories."""
@@ -82,13 +88,22 @@ class Store:
 
     # ── captures ──────────────────────────────────────────────────────────
 
-    def captures(self, flight_id=None, newest_first=True):
+    def captures(self, flight_id=ALL, newest_first=True):
+        """Captures, optionally for one flight.
+
+        `flight_id=None` means the ground captures -- the ones belonging to no
+        flight. Omit the argument entirely for all of them.
+        """
         with self._lock:
             records = self._read(self.captures_file)
-        if flight_id is not None:
+        if flight_id is not ALL:
             records = [r for r in records if r.get("flight_id") == flight_id]
         return sorted(records, key=lambda r: r.get("timestamp", ""),
                       reverse=newest_first)
+
+    def ground_captures(self, newest_first=True):
+        """Captures taken without a flight, including migrated legacy records."""
+        return self.captures(flight_id=None, newest_first=newest_first)
 
     def capture(self, capture_id):
         return next((r for r in self.captures() if r["id"] == capture_id), None)
@@ -476,6 +491,132 @@ def build_grid(captures, bounds, t_healthy, t_moderate,
             cells[i] = round(sums[i] / counts[i], 4)
             covered += 1
     return {"cols": cols, "rows": rows, "cells": cells, "covered": covered}
+
+
+def footprint(geo, fov_h_deg=62.2, fov_v_deg=48.8):
+    """How much ground one photo covers, as a centre + half-extents in metres.
+
+    Straight trigonometry for a nadir-pointing camera: at height h, a lens with
+    horizontal angle of view a covers 2*h*tan(a/2) across. For the Pi Camera v2
+    (62.2 x 48.8 degrees) at 12 m that is about 14.5 x 10.9 m.
+
+    Returns None when there is no usable height — without altitude the footprint
+    is unknowable, and guessing one would put invented ground on the map.
+    """
+    if not geo:
+        return None
+    height = geo.get("rel_alt_m")
+    if not height or height <= 0:
+        return None
+    half_w = height * math.tan(math.radians(fov_h_deg / 2.0))
+    half_h = height * math.tan(math.radians(fov_v_deg / 2.0))
+    return {
+        "lat": geo["lat"], "lon": geo["lon"],
+        "half_w_m": round(half_w, 3), "half_h_m": round(half_h, 3),
+        "width_m": round(half_w * 2, 2), "height_m": round(half_h * 2, 2),
+        "heading_deg": geo.get("heading_deg") or 0.0,
+        "height_m_agl": height,
+        # metres per pixel at the capture's own resolution, i.e. the ground
+        # sampling distance — the honest limit on what this data can resolve
+        "gsd_cm": None,
+    }
+
+
+def ground_sampling_distance_cm(geo, resolution, fov_h_deg=62.2):
+    """Centimetres per pixel on the ground. The real resolution limit."""
+    fp = footprint(geo, fov_h_deg)
+    if not fp or not resolution:
+        return None
+    return round(fp["width_m"] / max(1, resolution[0]) * 100, 2)
+
+
+# Typical F450 mapping speed. Slow enough that 5000 us of shutter does not smear.
+DEFAULT_SURVEY_SPEED_MS = 3.0
+# Measured: raw JPEG + heatmap + false colour + thumbnail + npz at 8 MP.
+BYTES_PER_CAPTURE = 8 * 1024 * 1024
+# A 3S 5200 mAh pack on an F450 realistically gives this much useful survey time.
+USABLE_FLIGHT_MINUTES = 10.0
+
+
+def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
+                 forward_overlap=0.40, side_overlap=0.30, plot_side_m=320,
+                 speed_ms=DEFAULT_SURVEY_SPEED_MS, resolution=(3280, 2464)):
+    """Work out what to type into Mission Planner for a given altitude.
+
+    The camera is assumed mounted with its **wide** axis across the flight track,
+    which is the usual way round because it maximises swath width. So the
+    62.2-degree axis sets the line spacing and the 48.8-degree axis sets how far
+    apart the photos are along each line.
+
+    Overlap defaults are deliberately modest. This system places each photo by
+    telemetry rather than stitching a true orthomosaic, so it needs only enough
+    overlap to avoid gaps when GPS wanders -- not the 70-80% a
+    structure-from-motion pipeline would want. Raise them if you later switch to
+    real photogrammetry.
+
+    Returns everything needed for the pre-flight card, including the two numbers
+    that go straight into the mission: CAM_TRIGG_DIST and the line spacing.
+    """
+    h = max(1.0, float(altitude_m))
+    swath_w = 2 * h * math.tan(math.radians(fov_h_deg / 2.0))   # across track
+    along_h = 2 * h * math.tan(math.radians(fov_v_deg / 2.0))   # along track
+
+    forward_overlap = min(0.9, max(0.0, float(forward_overlap)))
+    side_overlap = min(0.9, max(0.0, float(side_overlap)))
+
+    photo_spacing = along_h * (1.0 - forward_overlap)
+    line_spacing = swath_w * (1.0 - side_overlap)
+
+    side = max(10.0, float(plot_side_m))
+    lines = max(1, math.ceil(side / max(0.5, line_spacing)))
+    per_line = max(1, math.ceil(side / max(0.5, photo_spacing)) + 1)
+    photos = lines * per_line
+
+    # Lawnmower path: every leg, plus the turns between them.
+    path_m = lines * side + (lines - 1) * line_spacing
+    minutes = path_m / max(0.3, float(speed_ms)) / 60.0
+
+    gsd_cm = swath_w / max(1, resolution[0]) * 100 if resolution else None
+
+    warnings = []
+    if minutes > USABLE_FLIGHT_MINUTES:
+        warnings.append(
+            f"About {minutes:.0f} minutes of flying — more than one 3S pack "
+            f"realistically covers. Split the plot into blocks, fly higher, or "
+            f"reduce the overlap.")
+    if photo_spacing < 1.5:
+        warnings.append(
+            f"Photos every {photo_spacing:.1f} m is faster than the camera can "
+            f"comfortably capture and save at full resolution. Fly higher or "
+            f"lower the forward overlap.")
+    if h < 5:
+        warnings.append("Below about 5 m the footprint is tiny and you will need "
+                        "a great many photos to cover anything.")
+    if h > 60:
+        warnings.append("Above 60 m each pixel covers several centimetres, so "
+                        "individual plant detail is lost.")
+
+    return {
+        "altitude_m": round(h, 1),
+        "footprint_w_m": round(swath_w, 2),
+        "footprint_h_m": round(along_h, 2),
+        "gsd_cm": round(gsd_cm, 2) if gsd_cm else None,
+        "forward_overlap_pct": round(forward_overlap * 100),
+        "side_overlap_pct": round(side_overlap * 100),
+        # the two numbers that go into Mission Planner
+        "trigger_distance_m": round(photo_spacing, 1),
+        "line_spacing_m": round(line_spacing, 1),
+        "plot_side_m": round(side),
+        "plot_area_ha": round(side * side / 10_000.0, 2),
+        "lines": lines,
+        "photos_per_line": per_line,
+        "photos": photos,
+        "path_m": round(path_m),
+        "minutes": round(minutes, 1),
+        "speed_ms": round(float(speed_ms), 1),
+        "storage_mb": round(photos * BYTES_PER_CAPTURE / (1024 * 1024)),
+        "warnings": warnings,
+    }
 
 
 def summarise(mean, stressed_pct, has_gps=True):

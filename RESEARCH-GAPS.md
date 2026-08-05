@@ -483,9 +483,19 @@ and made it editable from the map.
 I could not verify the Altura Bata coordinate independently — the geocoding services were
 blocked, so it comes from a search result, and it's a *barangay centroid*, not your plot.
 
-**To close:** stand in the field, read the coordinates off the dashboard (or any phone GPS),
-and set the plot centre from **Settings**. Then reconcile the barangay name with the paper
-before the defense — an examiner reading both will notice.
+**This is why the UI now separates a vicinity from a survey block.** The 54.9 ha of
+downloaded imagery is a neighbourhood that *contains* the farm; the farm's own outline is
+unknown, so the dashboard makes you go and find it. The farm map renders the vicinity
+before any flight exists, and *Mark the block you fly* stores a centre and a size
+(`survey_lat` / `survey_lon` / `survey_side_m`) that the mission planner then plans for.
+Unmarked, it stays `null` rather than defaulting to the barangay centroid — a made-up
+centre would have quietly produced a mission over the wrong ground.
+
+**To close:** open the farm map, find the dragon fruit rows on the satellite view and mark
+the block; or stand in the field, read the coordinates off the dashboard, and set them from
+**Settings**. Then reconcile the barangay name with the paper before the defense — an
+examiner reading both will notice. If the rows turn out to lie outside the 54.9 ha, move the
+vicinity centre and re-download.
 
 ---
 

@@ -100,6 +100,76 @@
     });
   }
 
+  /* ── mission planner ─────────────────────────────────────────────────────
+     Recomputes the two Mission Planner numbers from the lens geometry as you
+     move the sliders. Server-side so the maths lives in one place (flights.py)
+     rather than being duplicated here and drifting. */
+
+  const planner = document.getElementById('mission-planner');
+  if (planner) {
+    const alt = document.getElementById('mp-alt');
+    const fwd = document.getElementById('mp-fwd');
+    const side = document.getElementById('mp-side');
+    const plot = document.getElementById('mp-plot');
+
+    function paintPlan(p) {
+      setText('mp-trigger', p.trigger_distance_m + ' m');
+      setText('mp-spacing', p.line_spacing_m + ' m');
+      setText('mp-footprint', p.footprint_w_m + ' × ' + p.footprint_h_m + ' m');
+      setText('mp-gsd', p.gsd_cm ? p.gsd_cm + ' cm per pixel' : '—');
+      setText('mp-photos', p.photos + ' over ' + p.plot_area_ha + ' ha');
+      setText('mp-lines', p.lines + ' lines, ' + p.photos_per_line + ' photos each');
+      setText('mp-time', p.minutes + ' min at ' + p.speed_ms + ' m/s');
+      setText('mp-storage', p.storage_mb >= 1024
+        ? (p.storage_mb / 1024).toFixed(1) + ' GB'
+        : p.storage_mb + ' MB');
+      setText('mp-speed', p.speed_ms + ' m/s');
+
+      const box = document.getElementById('mp-warnings');
+      if (box) {
+        box.innerHTML = (p.warnings || []).map(function (w) {
+          return '<div class="mp-warning">' + esc(w) + '</div>';
+        }).join('');
+      }
+    }
+
+    const refreshPlan = HC.debounce(function () {
+      const params = new URLSearchParams({
+        altitude: alt.value,
+        forward: (parseFloat(fwd.value) / 100).toFixed(2),
+        side: (parseFloat(side.value) / 100).toFixed(2),
+        plot_side: plot.value
+      });
+      HC.api('/api/mission/plan?' + params).then(paintPlan)
+        .catch(function () {});
+    }, 200);
+
+    HC.slider(alt, document.getElementById('mp-alt-label'),
+      function (v) { return Math.round(v) + ' m'; }, refreshPlan);
+    HC.slider(fwd, document.getElementById('mp-fwd-label'),
+      function (v) { return Math.round(v) + '%'; }, refreshPlan);
+    HC.slider(side, document.getElementById('mp-side-label'),
+      function (v) { return Math.round(v) + '%'; }, refreshPlan);
+    // Block size is one number in two places — here and the picker on the map —
+    // so editing it here persists rather than diverging from what the map draws.
+    if (plot) {
+      plot.addEventListener('input', function () {
+        refreshPlan();
+        const v = parseInt(plot.value, 10);
+        if (v >= 10) HC.saveSetting({ survey_side_m: v });
+      });
+    }
+
+    // Render the plan the server already worked out, then let the sliders take over.
+    try { paintPlan(JSON.parse(planner.dataset.plan)); } catch (e) { refreshPlan(); }
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
   /* ── live telemetry while armed ──────────────────────────────────────────── */
 
   if (recording) {

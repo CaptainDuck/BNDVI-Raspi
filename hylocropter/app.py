@@ -17,6 +17,7 @@ Run on the Pi:
 
 import argparse
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -43,7 +44,12 @@ import tiles as tiles_mod
 
 BASE_DIR = Path(__file__).parent.resolve()
 REPO_ROOT = BASE_DIR.parent
-DATA_DIR = BASE_DIR / "hylocropter_data"
+# File-relative by default, so `python hylocropter/app.py` from anywhere lands in
+# the same place and never leaves a stray data folder wherever you were standing.
+# HYLOCROPTER_DATA overrides it for the route tests, which must not scribble on
+# real flights -- but it has to be an explicit choice, never a cwd-relative one.
+DATA_DIR = Path(os.environ.get("HYLOCROPTER_DATA")
+                or BASE_DIR / "hylocropter_data")
 TILES_DIR = BASE_DIR / "static" / "tiles"
 LEGACY_DIR = REPO_ROOT / "bndvi_dashboard" / "bndvi_output"
 
@@ -193,11 +199,36 @@ def page_map():
             previous = next((f for f in all_flights[idx + 1:]
                              if f.get("stats")), None)
 
+    # Compact, map-ready view of the captures: position, footprint and the
+    # false-colour thumbnail, which is what the photo mosaic is built from.
+    pins = []
+    for c in captures:
+        geo = c.get("geo") or {}
+        if geo.get("lat") is None:
+            continue
+        fp = flights_mod.footprint(geo, config.get("fov_h_deg"),
+                                  config.get("fov_v_deg"))
+        pins.append({
+            "id": c["id"],
+            "lat": geo["lat"], "lon": geo["lon"],
+            "heading": geo.get("heading_deg") or 0.0,
+            "alt": geo.get("rel_alt_m"),
+            "mean": (c.get("stats") or {}).get("mean"),
+            "classification": c.get("classification"),
+            "time": c["timestamp"][11:16],
+            "thumb": (url_for("captures_file", filename=c["files"]["thumb"])
+                      if c.get("files", {}).get("thumb") else None),
+            "footprint": fp,
+            "gsd_cm": flights_mod.ground_sampling_distance_cm(
+                geo, (c.get("settings") or {}).get("resolution"),
+                config.get("fov_h_deg")),
+        })
+
     return render_template(
         "map.html", view="map", flight=flight, flights=all_flights,
-        captures=captures, summary=summary, previous=previous,
+        captures=captures, pins=pins, summary=summary, previous=previous,
         trend=[f for f in finished if f.get("stats")][:6][::-1],
-        ground_captures=store.captures(flight_id=None),
+        ground_captures=store.ground_captures(),
         **_shell())
 
 
@@ -243,8 +274,19 @@ def page_new_flight():
         legs = max(1, mission["count"] - 1)
         est_photos = int(legs * mission["line_spacing_m"]
                          / max(1, config.get("trigger_distance_m")))
+    # The planner scales everything to the block the operator marked on the map,
+    # not to the whole downloaded vicinity -- that is tens of hectares of imagery
+    # to search in, and planning a mission over all of it would suggest an hour in
+    # the air for ground the drone was never going to cover.
+    plan = flights_mod.mission_plan(
+        altitude_m=snap["mission"].get("altitude_m") or 12,
+        fov_h_deg=config.get("fov_h_deg"), fov_v_deg=config.get("fov_v_deg"),
+        plot_side_m=config.get("survey_side_m"),
+        resolution=tuple(config.get("resolution")))
     return render_template("newflight.html", view="newflight", checks=checks,
-                           storage=storage, est_photos=est_photos, **_shell())
+                           storage=storage, est_photos=est_photos, plan=plan,
+                           block_marked=config.get("survey_lat") is not None,
+                           **_shell())
 
 
 @app.route("/processing")
@@ -257,7 +299,7 @@ def page_processing():
 def page_history():
     return render_template("history.html", view="history",
                            flights=store.flights(),
-                           ground_captures=store.captures(flight_id=None),
+                           ground_captures=store.ground_captures(),
                            **_shell())
 
 
@@ -318,7 +360,12 @@ def captures_file(filename):
 
 @app.route("/api/captures", methods=["GET"])
 def api_captures_list():
-    return jsonify(store.captures(flight_id=request.args.get("flight")))
+    wanted = request.args.get("flight")
+    # No ?flight= at all means every capture; an explicit empty value
+    # means the ground captures.
+    return jsonify(store.captures(
+        flight_id=flights_mod.ALL if wanted is None
+        else (wanted or None)))
 
 
 @app.route("/api/captures", methods=["POST"])
@@ -669,6 +716,27 @@ def api_diagnose_white():
     k, k_message = bndvi.solve_leak_coef(region["nir"], region["blue"])
     return jsonify({"verdict": verdict, "message": message, "region": region,
                     "k": k, "k_message": k_message})
+
+
+@app.route("/api/mission/plan")
+def api_mission_plan():
+    """What to type into Mission Planner for a given altitude and overlap."""
+    def num(name, default):
+        try:
+            return float(request.args.get(name, default))
+        except (TypeError, ValueError):
+            return float(default)
+    plan = flights_mod.mission_plan(
+        altitude_m=num("altitude", 12),
+        fov_h_deg=config.get("fov_h_deg"),
+        fov_v_deg=config.get("fov_v_deg"),
+        forward_overlap=num("forward", 0.40),
+        side_overlap=num("side", 0.30),
+        plot_side_m=num("plot_side", 100),
+        speed_ms=num("speed", flights_mod.DEFAULT_SURVEY_SPEED_MS),
+        resolution=tuple(config.get("resolution")),
+    )
+    return jsonify(plan)
 
 
 @app.route("/api/setup/state", methods=["GET", "POST"])

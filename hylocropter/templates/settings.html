@@ -132,14 +132,53 @@
     </div>
   </div>
 
+  {# ── the survey block ──────────────────────────────────────────────────
+     Kept separate from the offline-map card below on purpose. Two different
+     areas were being conflated: the vicinity is tens of hectares of imagery to
+     go looking on, the survey block is the hectare or two the drone actually
+     flies. #}
+  <div class="card elev-sm" style="margin-bottom:16px">
+    <span class="card-kicker">The block you fly</span>
+    <div class="card-title">Survey block</div>
+    {% if cfg.survey_lat is not none %}
+      <div class="kv">
+        {{ kv('Marked at', '%.5f, %.5f'|format(cfg.survey_lat, cfg.survey_lon)) }}
+        {{ kv('Size', cfg.survey_side_m ~ ' m across') }}
+        {{ kv('Area', '%.2f ha'|format((cfg.survey_side_m ** 2) / 10000.0)) }}
+      </div>
+      <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+        The mission planner works out altitude, photo spacing and flight time for
+        this block. Move it on the
+        <a href="{{ url_for('page_map') }}">farm map</a>.
+      </div>
+    {% else %}
+      <div class="card" style="background:var(--color-accent-100);gap:6px">
+        <strong style="font-family:var(--font-heading)">Not marked yet</strong>
+        <span style="font-size:13.5px">The offline imagery covers a whole
+          neighbourhood — far more than one flight. Open the
+          <a href="{{ url_for('page_map') }}">farm map</a>, find the dragon fruit
+          rows on the satellite view, and click to mark the block you want
+          surveyed. Until then the mission planner assumes a
+          {{ cfg.survey_side_m }} m block, which is a placeholder, not your
+          farm.</span>
+      </div>
+    {% endif %}
+  </div>
+
   {# ── offline map ───────────────────────────────────────────────────────── #}
   <div class="card elev-sm" style="margin-bottom:16px">
     <span class="card-kicker">Offline map</span>
-    <div class="card-title">How far the map is downloaded</div>
+    <div class="card-title">How much imagery is on the Pi</div>
+    <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+      This is the <strong>vicinity</strong> — the ground you can look at offline,
+      not the ground the drone flies. It is meant to be much bigger than the farm
+      so there is somewhere to search when you are not sure exactly where the
+      rows are.
+    </div>
 
     {% if coverage.has_tiles %}
       <div class="kv">
-        {{ kv('Plot you asked for', coverage.extent_label or '—') }}
+        {{ kv('Vicinity you asked for', coverage.extent_label or '—') }}
         {{ kv('Imagery actually on disk',
               (coverage.tile_area_ha ~ ' ha') if coverage.tile_area_ha else '—') }}
         {{ kv('Detail', coverage.detail_label or '—') }}
@@ -156,7 +195,7 @@
       </div>
       <div id="coverage-map" style="margin-top:10px"></div>
       <div class="text-muted" style="font-size:12px">
-        Solid line: how far the map goes at full detail. Dashed: the plot you
+        Solid line: how far the map goes at full detail. Dashed: the vicinity you
         asked for. Tiles snap outward to a whole-tile grid, so you get a little
         more ground than requested — useful when the drone drifts past the
         boundary. Zoomed out you'll see further still, because the lower zoom
@@ -176,15 +215,15 @@
 
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
       <div class="field">
-        <label for="s-lat">Plot latitude</label>
+        <label for="s-lat">Vicinity centre latitude</label>
         <input class="input" type="number" id="s-lat" step="0.00001" value="{{ cfg.plot_lat }}">
       </div>
       <div class="field">
-        <label for="s-lon">Plot longitude</label>
+        <label for="s-lon">Vicinity centre longitude</label>
         <input class="input" type="number" id="s-lon" step="0.00001" value="{{ cfg.plot_lon }}">
       </div>
       <div class="field">
-        <label for="s-box">Box size (m)</label>
+        <label for="s-box">Vicinity size (m across)</label>
         <input class="input" type="number" id="s-box" step="10" min="100" max="4000"
                value="{{ cfg.plot_box_m }}">
       </div>

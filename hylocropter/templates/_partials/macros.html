@@ -28,8 +28,9 @@
   </div>
 {%- endmacro %}
 
-{% macro kv(label, value) -%}
-  <div class="kv-row"><span>{{ label }}</span><span>{{ value }}</span></div>
+{% macro kv(label, value, id=None) -%}
+  <div class="kv-row"><span>{{ label }}</span>
+    <span{% if id %} id="{{ id }}"{% endif %}>{{ value }}</span></div>
 {%- endmacro %}
 
 {% macro signed(v, digits=3) -%}

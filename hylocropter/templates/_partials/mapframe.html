@@ -1,0 +1,97 @@
+{# The satellite map, shared by the "nothing flown yet" and "here is a flight"
+   states. Both need the same Leaflet host, the same vicinity outline and the
+   same survey-block picker; only the overlay tools differ, so `flight` gates
+   those rather than the whole map. #}
+<div class="card elev-sm map-card">
+  <div class="map-frame">
+    <div id="plot-map"
+         data-flight='{{ (flight or none)|tojson }}'
+         data-coverage='{{ coverage|tojson }}'
+         data-pins='{{ (pins or [])|tojson }}'
+         data-vicinity='{{ {"lat": cfg.plot_lat, "lon": cfg.plot_lon,
+                            "box_m": cfg.plot_box_m}|tojson }}'
+         data-survey='{{ {"lat": cfg.survey_lat, "lon": cfg.survey_lon,
+                          "side_m": cfg.survey_side_m}|tojson }}'></div>
+
+    {% if flight %}
+      <div class="map-overlay-panel map-legend hc-noprint">
+        <span class="map-legend-title">Plant stress</span>
+        {% set s = flight.stats or {} %}
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-healthy)"></span>
+          <span>Doing well</span>
+          <span class="legend-share">{{ '%.0f'|format(s.healthy_pct or 0) }}%</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-moderate)"></span>
+          <span>Keep an eye</span>
+          <span class="legend-share">{{ '%.0f'|format(s.moderate_pct or 0) }}%</span>
+        </div>
+        <div class="legend-row">
+          <span class="legend-swatch" style="background:var(--stress-stressed)"></span>
+          <span>Needs a look</span>
+          <span class="legend-share">{{ '%.0f'|format(s.stressed_pct or 0) }}%</span>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="map-overlay-panel map-tools hc-noprint">
+      {% if flight %}
+        <div class="map-modes" role="group" aria-label="What to show">
+          <button class="map-mode is-active" data-mode="photos"
+                  title="Each photo drawn where it was taken">Photos</button>
+          <button class="map-mode" data-mode="smooth"
+                  title="Averaged into a grid">Grid</button>
+          <button class="map-mode" data-mode="bands"
+                  title="Three colours at your thresholds">Bands</button>
+          <button class="map-mode" data-mode="none"
+                  title="Satellite imagery only">Off</button>
+        </div>
+        <label class="map-opacity">
+          <span>Fade</span>
+          <input type="range" id="map-opacity" min="0.15" max="1" step="0.05"
+                 value="0.82" aria-label="Overlay opacity">
+        </label>
+        <label class="map-toggle">
+          <input type="checkbox" id="map-show-pins" checked>
+          <span>Photo pins &amp; track</span>
+        </label>
+      {% endif %}
+
+      {# ── survey block picker ──────────────────────────────────────────── #}
+      <div class="map-block">
+        <button class="btn btn-secondary btn-sm" id="block-start">
+          {{ 'Move the block you fly' if cfg.survey_lat is not none
+             else 'Mark the block you fly' }}</button>
+        <div id="block-edit" hidden>
+          <div class="map-block-hint">Click the middle of the dragon fruit rows.</div>
+          <label class="map-block-size">
+            <span>Block size</span>
+            <span class="val" id="block-size-label">{{ cfg.survey_side_m }} m</span>
+          </label>
+          <input type="range" id="block-size" min="20" max="600" step="10"
+                 value="{{ cfg.survey_side_m }}" aria-label="Survey block size">
+          <div class="map-block-where" id="block-where">
+            {% if cfg.survey_lat is not none %}
+              {{ '%.5f, %.5f'|format(cfg.survey_lat, cfg.survey_lon) }}
+            {% else %}not placed yet{% endif %}
+          </div>
+          <div class="map-block-buttons">
+            <button class="btn btn-primary btn-sm" id="block-save" disabled>Save</button>
+            <button class="btn btn-ghost btn-sm" id="block-cancel">Cancel</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="block-clear"
+                  {{ 'hidden' if cfg.survey_lat is none }}>Unmark</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="map-hint" id="map-hint">
+    {% if flight %}
+      Move over the field to check one spot. Scroll to zoom, drag to pan.
+    {% else %}
+      Scroll to zoom, drag to pan. The dashed line is as far as the offline
+      imagery goes.
+    {% endif %}
+  </div>
+</div>
