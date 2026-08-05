@@ -644,8 +644,13 @@ def compute_bndvi(rgb_array, correct_nir_leakage=False,
     else:
         vis = blue_raw
 
+    # A black pixel gives 0/0. np.where would still pick the right answer, but it
+    # evaluates both branches, so the divide runs anyway and numpy warns on every
+    # capture of an unlit frame. Substituting the denominator keeps it quiet
+    # without changing a single output value.
     denom = nir + vis
-    bndvi = np.where(denom == 0, 0.0, (nir - vis) / denom)
+    safe = np.where(denom == 0, 1.0, denom)
+    bndvi = np.where(denom == 0, 0.0, (nir - vis) / safe)
     return np.clip(bndvi, -1.0, 1.0).astype(np.float32)
 
 

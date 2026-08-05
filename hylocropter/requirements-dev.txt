@@ -1,0 +1,4 @@
+# Test-only dependencies. Not installed on the Pi -- the runtime requirements are
+# in requirements.txt and deliberately stay short.
+-r requirements.txt
+pytest>=8.0

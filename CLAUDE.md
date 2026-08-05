@@ -49,10 +49,35 @@ python hylocropter/app.py --dev                      # synthetic frames (laptop)
 python hylocropter/app.py --debug                    # Flask reloader on
 ```
 
-There is **no test suite, linter, or build step** — this is a small student
-project. Verification during development was a Playwright script (described at
-the end of `DEPLOYMENT.md`); if you add tests, put them under `hylocropter/` and
-note the runner here.
+```bash
+pip install -r hylocropter/requirements-dev.txt
+pytest                            # 152 tests, from the repo root or anywhere
+pytest hylocropter/tests/test_index.py -v
+```
+
+**Tests** live in `hylocropter/tests/` and run under **pytest** (config in
+`pytest.ini` at the repo root). There is no linter and **no build step**.
+
+- `test_index.py` — the plant-health maths. The channel mapping, the bands, the
+  leak correction, the white-reference solve, the rig diagnostics, and a check
+  that `colormap.js` still matches `BNDVI_COLOR_STOPS`.
+- `test_mapping.py` — photo → footprint → bounds → grid → mission plan. Pins the
+  two invariants that keep the map honest: empty cells stay `null`, and row 0 is
+  the northern edge.
+- `test_store.py` — the JSON indexes, concurrent writes, legacy migration, and
+  settings clamping.
+- `test_routes.py` — every page renders with no camera and no drone. Imports
+  `app.py`, so it sets `HYLOCROPTER_DATA` to a scratch directory first; **never
+  point that at real data.**
+
+`.github/workflows/verify.yml` runs all of it in **one job**, plus four things
+pytest can't check: `bndvi.py` running in a venv with Flask absent, the working
+directory staying irrelevant, the app booting via `__main__`, and greps for a CDN
+reference or a reintroduced `(B - R)/(B + R)`.
+
+What CI **cannot** prove: the camera path and the MAVLink path. Those need a bench
+run — see `DEPLOYMENT.md` and `RESEARCH-GAPS.md` §7. UI behaviour is still checked
+by hand with Playwright (described at the end of `DEPLOYMENT.md`).
 
 ## Hardware-specific physics (do NOT get this wrong)
 

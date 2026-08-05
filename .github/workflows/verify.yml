@@ -1,0 +1,112 @@
+# Everything in one job, on purpose.
+#
+# The steps share a checkout, a Python install and a pip cache, and they run in
+# seconds — splitting them across jobs would spend more time on setup than on the
+# work. It also keeps the failure report linear: the first red step is the answer.
+#
+# What CI can and cannot prove is worth being clear about. There is no camera, no
+# Pixhawk and no internet here, so this verifies the maths, the data model, the
+# routes and the offline claim. The camera path and the MAVLink path still need a
+# bench run — see DEPLOYMENT.md and RESEARCH-GAPS.md §7.
+name: Verify
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Tests and offline checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.11 is what Raspberry Pi OS Bookworm ships, so this is the interpreter
+      # the code actually runs on.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: hylocropter/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r hylocropter/requirements-dev.txt
+
+      - name: Unit tests
+        run: python -m pytest -v
+
+      # The project convention: bndvi.py is the minimal reproducer and has to run
+      # with Flask absent. A venv without Flask is the only way to actually prove
+      # that -- in the main environment the import would succeed either way.
+      - name: bndvi.py runs standalone, with no Flask installed
+        run: |
+          python -m venv /tmp/noflask
+          /tmp/noflask/bin/pip install --quiet numpy matplotlib Pillow
+          ! /tmp/noflask/bin/python -c "import flask" 2>/dev/null
+          /tmp/noflask/bin/python hylocropter/bndvi.py --dev --scene stressed \
+            -o /tmp/standalone-out
+          /tmp/noflask/bin/python hylocropter/bndvi.py --dev --correct-nir --k 0.35 \
+            --save-array -o /tmp/standalone-out
+          test -n "$(ls /tmp/standalone-out)"
+
+      # The working directory must be irrelevant: both entry points derive their
+      # paths from __file__, so a cwd-relative default cannot creep back in.
+      - name: The working directory stays irrelevant
+        run: |
+          mkdir -p /tmp/elsewhere && cd /tmp/elsewhere
+          python "$GITHUB_WORKSPACE/hylocropter/bndvi.py" --dev --scene soil
+          test ! -e /tmp/elsewhere/hylocropter_data
+          test -d "$GITHUB_WORKSPACE/hylocropter/hylocropter_data/ground"
+
+      # The dashboard has to boot with no camera and no flight controller, which
+      # is also the state of a Pi on the bench. The route tests use Flask's test
+      # client; this additionally exercises __main__ and the argument parsing.
+      - name: Dashboard boots in dev mode
+        run: |
+          python hylocropter/app.py --dev --port 5001 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:5001/ && break
+            sleep 1
+          done
+          for path in / /new-flight /processing /history /debug /settings /setup; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5001$path")
+            echo "$path -> $code"
+            test "$code" = "200"
+          done
+          curl -sf http://127.0.0.1:5001/api/telemetry > /dev/null
+          curl -sf http://127.0.0.1:5001/api/mission/plan?altitude_m=12 > /dev/null
+
+      # The thesis's central claim is that nothing reaches the network at run
+      # time. Leaflet and the fonts are vendored and tiles come off local disk, so
+      # a CDN reference anywhere in the served assets is a bug -- and one that
+      # would only show up in the field, with no way to fix it there.
+      - name: Nothing reaches the network at run time
+        run: |
+          if grep -rInE \
+            'https?://(unpkg|cdn\.jsdelivr|cdnjs|fonts\.(googleapis|gstatic))|https?://[a-z0-9.-]*(arcgisonline|openstreetmap|mapbox|basemaps\.cartocdn|virtualearth)' \
+            hylocropter/templates hylocropter/static/css hylocropter/static/js \
+            --include='*.html' --include='*.css' --include='*.js'; then
+            echo "::error::A served asset references an external host."
+            exit 1
+          fi
+          test -f hylocropter/static/vendor/leaflet/leaflet.js
+          test -f hylocropter/static/vendor/leaflet/leaflet.css
+
+      # The archived original had the channel mapping reversed. If (B - R)/(B + R)
+      # ever appears outside that file, the old bug is being reintroduced.
+      - name: The reversed-channel bug has not come back
+        run: |
+          if grep -rInE '\(\s*(blue|b)\s*-\s*(nir|r|red)\s*\)\s*/' \
+            hylocropter --include='*.py' --include='*.js'; then
+            echo "::error::Found (B - R)/(B + R) — see CLAUDE.md, the channel mapping."
+            exit 1
+          fi

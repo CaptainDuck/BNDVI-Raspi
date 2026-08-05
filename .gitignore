@@ -222,3 +222,7 @@ __marimo__/
 # unexpected working directory can't sneak one into a commit.
 hylocropter_data/
 bndvi_output/
+
+# Scratch data directory the route tests point HYLOCROPTER_DATA at. Cleaned up on
+# a normal run; this catches an interrupted one.
+hylocropter/tests/_scratch_data/

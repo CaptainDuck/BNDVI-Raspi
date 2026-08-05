@@ -209,7 +209,23 @@ rather than during.
 
 ### Development checks
 
-Playwright verification lives outside the repo (it needs a browser the Pi
+**The test suite runs anywhere, including on the Pi:**
+
+```bash
+pip install -r hylocropter/requirements-dev.txt
+pytest
+```
+
+152 tests covering the index maths, the photo→footprint→grid mapping chain, the
+JSON store, the settings, and every route rendering with no camera and no drone.
+`.github/workflows/verify.yml` runs the same suite on every push, in one job,
+plus the standalone-`bndvi.py` check, the app boot, and greps for a CDN reference
+or a reintroduced `(B − R)/(B + R)`.
+
+Worth being explicit: **CI does not test the camera or MAVLink.** Nothing about a
+green tick means those work — the checklists above are still the only evidence.
+
+**Playwright** verification lives outside the repo (it needs a browser the Pi
 doesn't have). It asserts, for all seven views at desktop and phone widths: the
 page renders, Leaflet initialises from the vendored file, the BNDVI overlay
 draws, all seven debug canvases actually paint, moving `k` repaints with **zero**
