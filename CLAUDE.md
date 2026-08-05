@@ -51,7 +51,7 @@ python hylocropter/app.py --debug                    # Flask reloader on
 
 ```bash
 pip install -r hylocropter/requirements-dev.txt
-pytest                            # 152 tests, from the repo root or anywhere
+pytest                            # 183 tests, from the repo root or anywhere
 pytest hylocropter/tests/test_index.py -v
 ```
 
@@ -61,11 +61,14 @@ pytest hylocropter/tests/test_index.py -v
 - `test_index.py` — the plant-health maths. The channel mapping, the bands, the
   leak correction, the white-reference solve, the rig diagnostics, and a check
   that `colormap.js` still matches `BNDVI_COLOR_STOPS`.
-- `test_mapping.py` — photo → footprint → bounds → grid → mission plan. Pins the
-  two invariants that keep the map honest: empty cells stay `null`, and row 0 is
-  the northern edge.
-- `test_store.py` — the JSON indexes, concurrent writes, legacy migration, and
-  settings clamping.
+- `test_mapping.py` — photo → footprint → bounds → grid → mission plan, plus the
+  survey-block rectangles. Pins the two invariants that keep the map honest (empty
+  cells stay `null`, row 0 is the northern edge) and the two that keep a plan
+  sensible (corners sort whichever way they were clicked, lines run along the
+  longer axis).
+- `test_store.py` — the JSON indexes, concurrent writes, legacy migration,
+  settings clamping, and the survey blocks: validation, de-duplication, and
+  migrating the old single square into one.
 - `test_routes.py` — every page renders with no camera and no drone. Imports
   `app.py`, so it sets `HYLOCROPTER_DATA` to a scratch directory first; **never
   point that at real data.**
@@ -179,6 +182,31 @@ Flights carry `bounds`, a `grid` (14×9 cells binned from capture positions), an
 their own `thresholds`. **Empty grid cells stay `null`** and render transparent —
 painting an unvisited cell mid-range would invent healthy ground the drone never
 flew over, which is exactly the sort of thing a farmer would act on.
+
+### Three areas, and don't conflate them
+
+This tripped up an earlier pass, so it's worth stating plainly:
+
+| | Setting | What it is |
+|---|---|---|
+| **Vicinity** | `plot_lat` / `plot_lon` / `plot_box_m` | The one box of satellite imagery downloaded to disk. 620 m, ~55 ha. Ground to *search*, because the farm's exact position is unknown (`RESEARCH-GAPS.md` §9). The `plot_` names are historical — don't call it the plot in the UI. |
+| **Survey blocks** | `survey_blocks` | A **list** of named rectangles inside that vicinity — the plots actually flown. `{id, name, south, west, north, east}`. Empty until someone draws one; never defaulted, because a made-up rectangle plans a mission over the wrong ground. |
+| **Flight bounds** | `flight.bounds` | Where the drone actually went, derived from the captures' GPS after the fact. |
+
+Rectangles rather than a centre and a side length because real plots aren't square,
+and a list because a farm has several. `flights.normalise_block()` is the only
+gate: it sorts corners (clicks arrive in any order), rejects anything under 5 m,
+and names unnamed blocks. Settings runs values from disk through it too, so a
+hand-edited `settings.json` can't reach the map.
+
+`config.block_names()` is **derived** from `survey_blocks`, falling back to the
+legacy `blocks` name list when nothing is drawn. That's what the All-flights filter
+and the default flight name read, so naming a block on the map is the only place
+names are managed — there used to be two lists and they drifted.
+
+`mission_plan()` takes `plot_w_m` / `plot_h_m` (or `plot_side_m` as a square
+shorthand) and **runs flight lines along the longer axis** — turns cost battery,
+so a 200×60 m strip is 6 lines rather than 20.
 
 ### Storage
 

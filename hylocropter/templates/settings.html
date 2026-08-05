@@ -138,29 +138,33 @@
      go looking on, the survey block is the hectare or two the drone actually
      flies. #}
   <div class="card elev-sm" style="margin-bottom:16px">
-    <span class="card-kicker">The block you fly</span>
-    <div class="card-title">Survey block</div>
-    {% if cfg.survey_lat is not none %}
+    <span class="card-kicker">The blocks you fly</span>
+    <div class="card-title">Survey blocks</div>
+    {% if blocks %}
       <div class="kv">
-        {{ kv('Marked at', '%.5f, %.5f'|format(cfg.survey_lat, cfg.survey_lon)) }}
-        {{ kv('Size', cfg.survey_side_m ~ ' m across') }}
-        {{ kv('Area', '%.2f ha'|format((cfg.survey_side_m ** 2) / 10000.0)) }}
+        {% for b in blocks %}
+          {{ kv(b.name, (b.width_m|round|int ~ ' × ' ~ b.height_m|round|int
+                         ~ ' m · ' ~ '%.2f'|format(b.area_ha) ~ ' ha')) }}
+        {% endfor %}
+        {{ kv('Total', '%.2f ha across %d block%s'|format(
+              blocks|sum(attribute='area_ha'), blocks|length,
+              '' if blocks|length == 1 else 's')) }}
       </div>
       <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
-        The mission planner works out altitude, photo spacing and flight time for
-        this block. Move it on the
-        <a href="{{ url_for('page_map') }}">farm map</a>.
+        Drawn on the <a href="{{ url_for('page_map') }}">farm map</a>, which is
+        also where you add, rename or remove them. These names are the choices on
+        the <a href="{{ url_for('page_history') }}">All flights</a> filter, and the
+        mission planner sizes each flight to whichever one you pick.
       </div>
     {% else %}
       <div class="card" style="background:var(--color-accent-100);gap:6px">
-        <strong style="font-family:var(--font-heading)">Not marked yet</strong>
+        <strong style="font-family:var(--font-heading)">Nothing drawn yet</strong>
         <span style="font-size:13.5px">The offline imagery covers a whole
           neighbourhood — far more than one flight. Open the
           <a href="{{ url_for('page_map') }}">farm map</a>, find the dragon fruit
-          rows on the satellite view, and click to mark the block you want
-          surveyed. Until then the mission planner assumes a
-          {{ cfg.survey_side_m }} m block, which is a placeholder, not your
-          farm.</span>
+          rows on the satellite view, and draw a box around each plot you want
+          surveyed. Until then the mission planner assumes a placeholder square
+          rather than your farm.</span>
       </div>
     {% endif %}
   </div>

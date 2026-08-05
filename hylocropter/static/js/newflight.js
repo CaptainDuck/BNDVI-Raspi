@@ -110,15 +110,21 @@
     const alt = document.getElementById('mp-alt');
     const fwd = document.getElementById('mp-fwd');
     const side = document.getElementById('mp-side');
-    const plot = document.getElementById('mp-plot');
+    const plotW = document.getElementById('mp-plot-w');
+    const plotH = document.getElementById('mp-plot-h');
+    const blockPick = document.getElementById('mp-block');
 
     function paintPlan(p) {
       setText('mp-trigger', p.trigger_distance_m + ' m');
       setText('mp-spacing', p.line_spacing_m + ' m');
       setText('mp-footprint', p.footprint_w_m + ' × ' + p.footprint_h_m + ' m');
       setText('mp-gsd', p.gsd_cm ? p.gsd_cm + ' cm per pixel' : '—');
-      setText('mp-photos', p.photos + ' over ' + p.plot_area_ha + ' ha');
+      setText('mp-photos', p.photos + ' over ' + p.plot_area_ha + ' ha (' +
+        p.plot_w_m + ' × ' + p.plot_h_m + ' m)');
       setText('mp-lines', p.lines + ' lines, ' + p.photos_per_line + ' photos each');
+      // Which way round matters on a rectangle: the long axis means fewer turns.
+      setText('mp-direction', p.line_direction +
+        ', along the block\u2019s longer side');
       setText('mp-time', p.minutes + ' min at ' + p.speed_ms + ' m/s');
       setText('mp-storage', p.storage_mb >= 1024
         ? (p.storage_mb / 1024).toFixed(1) + ' GB'
@@ -138,7 +144,8 @@
         altitude: alt.value,
         forward: (parseFloat(fwd.value) / 100).toFixed(2),
         side: (parseFloat(side.value) / 100).toFixed(2),
-        plot_side: plot.value
+        plot_w: plotW ? plotW.value : '',
+        plot_h: plotH ? plotH.value : ''
       });
       HC.api('/api/mission/plan?' + params).then(paintPlan)
         .catch(function () {});
@@ -150,13 +157,32 @@
       function (v) { return Math.round(v) + '%'; }, refreshPlan);
     HC.slider(side, document.getElementById('mp-side-label'),
       function (v) { return Math.round(v) + '%'; }, refreshPlan);
-    // Block size is one number in two places — here and the picker on the map —
-    // so editing it here persists rather than diverging from what the map draws.
-    if (plot) {
-      plot.addEventListener('input', function () {
+    if (plotW) plotW.addEventListener('input', refreshPlan);
+    if (plotH) plotH.addEventListener('input', refreshPlan);
+
+    /* Choosing a block fills in its real dimensions. They stay editable — the
+       boxes are the escape hatch for "this plot isn't drawn yet", and typing in
+       them switches the picker to "Something else" rather than silently
+       contradicting the named block above. */
+    if (blockPick) {
+      let known = [];
+      try { known = JSON.parse(blockPick.dataset.blocks || '[]'); } catch (e) {}
+      blockPick.addEventListener('change', function () {
+        const b = known.find(function (x) { return x.id === blockPick.value; });
+        if (!b) return;
+        if (plotW) plotW.value = Math.round(b.width_m);
+        if (plotH) plotH.value = Math.round(b.height_m);
         refreshPlan();
-        const v = parseInt(plot.value, 10);
-        if (v >= 10) HC.saveSetting({ survey_side_m: v });
+      });
+      [plotW, plotH].forEach(function (el) {
+        if (!el) return;
+        el.addEventListener('input', function () {
+          const b = known.find(function (x) { return x.id === blockPick.value; });
+          if (!b) return;
+          const same = Math.round(b.width_m) === parseInt(plotW.value, 10) &&
+                       Math.round(b.height_m) === parseInt(plotH.value, 10);
+          if (!same) blockPick.value = '';
+        });
       });
     }
 

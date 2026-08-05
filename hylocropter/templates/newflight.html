@@ -62,25 +62,28 @@
       </div>
 
       {# Which block, and is it real? The offline imagery covers a whole
-         neighbourhood; the drone flies a small part of it. Planning against the
-         wrong one is the difference between six minutes and an hour in the air. #}
-      {% if block_marked %}
-        <div style="font-size:13px;display:flex;gap:8px;align-items:flex-start">
-          <span class="check-mark ok">✓</span>
-          <div>Planning for the block you marked on the
-            <a href="{{ url_for('page_map') }}">farm map</a> —
-            <strong>{{ cfg.survey_side_m }} m across,
-              {{ '%.2f'|format((cfg.survey_side_m ** 2) / 10000.0) }} ha</strong>.
-            Not the whole downloaded map, which is far bigger than one flight.</div>
+         neighbourhood; the drone flies one plot of it. Planning against the wrong
+         one is the difference between six minutes and an hour in the air. #}
+      {% if blocks %}
+        <div class="field" style="max-width:320px">
+          <label for="mp-block">Which block are you flying?</label>
+          <select class="input" id="mp-block" data-blocks='{{ blocks|tojson }}'>
+            {% for b in blocks %}
+              <option value="{{ b.id }}">{{ b.name }} —
+                {{ b.width_m|round|int }} × {{ b.height_m|round|int }} m
+                ({{ '%.2f'|format(b.area_ha) }} ha)</option>
+            {% endfor %}
+            <option value="">Something else — type the size</option>
+          </select>
         </div>
       {% else %}
         <div style="font-size:13px;display:flex;gap:8px;align-items:flex-start">
           <span class="check-mark bad">!</span>
-          <div>No block marked yet, so this assumes a placeholder
-            {{ cfg.survey_side_m }} m square. Find your rows on the
-            <a href="{{ url_for('page_map') }}">farm map</a> and mark the block —
-            the photo count, flight time and battery estimate below all depend on
-            it.</div>
+          <div>No blocks drawn yet, so this assumes a placeholder
+            {{ plan.plot_w_m }} × {{ plan.plot_h_m }} m square. Find your rows on
+            the <a href="{{ url_for('page_map') }}">farm map</a> and draw a box
+            around one plot — the photo count, flight time and battery estimate
+            below all depend on it.</div>
         </div>
       {% endif %}
 
@@ -104,9 +107,14 @@
                  aria-label="Side overlap">
         </div>
         <div class="field">
-          <label for="mp-plot">Block you fly (m across)</label>
-          <input class="input" type="number" id="mp-plot" min="10" max="1000"
-                 step="10" value="{{ cfg.survey_side_m }}">
+          <label for="mp-plot-w">Block width (m)</label>
+          <input class="input" type="number" id="mp-plot-w" min="10" max="2000"
+                 step="10" value="{{ plan.plot_w_m }}">
+        </div>
+        <div class="field">
+          <label for="mp-plot-h">Block depth (m)</label>
+          <input class="input" type="number" id="mp-plot-h" min="10" max="2000"
+                 step="10" value="{{ plan.plot_h_m }}">
         </div>
       </div>
 
@@ -129,6 +137,7 @@
         {{ kv('Detail on the ground', '—', 'mp-gsd') }}
         {{ kv('Photos for this block', '—', 'mp-photos') }}
         {{ kv('Flight lines', '—', 'mp-lines') }}
+        {{ kv('Fly the lines', '—', 'mp-direction') }}
         {{ kv('Time in the air', '—', 'mp-time') }}
         {{ kv('Storage needed', '—', 'mp-storage') }}
       </div>

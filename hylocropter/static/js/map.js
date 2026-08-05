@@ -31,8 +31,8 @@
   const flight = JSON.parse(host.dataset.flight || 'null');
   const coverage = JSON.parse(host.dataset.coverage);
   const vicinity = JSON.parse(host.dataset.vicinity);
-  const survey = JSON.parse(host.dataset.survey || 'null') || {};
   const pins = JSON.parse(host.dataset.pins || '[]');
+  let blocks = JSON.parse(host.dataset.blocks || '[]');
 
   let mode = 'photos';
   let overlay = null;
@@ -110,13 +110,24 @@
     attribution: coverage.attribution || 'Imagery © Esri'
   }).addTo(map);
 
-  /* Opening view. With a flight, frame the flight. Without one, frame the marked
-     survey block if there is one, and otherwise the whole vicinity — which is
-     the "I don't know where the farm is yet, show me everything" case. */
-  const openingBounds = mosaicBounds || (flight ? gridBounds : (
-    (survey.lat === null || survey.lat === undefined)
-      ? vicinityBounds()
-      : squareBounds(survey.lat, survey.lon, Math.max(survey.side_m * 4, 200))));
+  /* Opening view. With a flight, frame the flight. Without one, frame the drawn
+     blocks if there are any, and otherwise the whole vicinity — which is the
+     "I don't know where the farm is yet, show me everything" case. */
+  function allBlocksBounds() {
+    if (!blocks.length) return null;
+    let s = 90, w = 180, n = -90, e = -180;
+    blocks.forEach(function (b) {
+      s = Math.min(s, b.south); n = Math.max(n, b.north);
+      w = Math.min(w, b.west); e = Math.max(e, b.east);
+    });
+    // pad so a single small block doesn't open zoomed to the point of no context
+    const padLat = (n - s) * 0.6 + 0.0004;
+    const padLon = (e - w) * 0.6 + 0.0004;
+    return [[s - padLat, w - padLon], [n + padLat, e + padLon]];
+  }
+
+  const openingBounds = mosaicBounds ||
+    (flight ? gridBounds : (allBlocksBounds() || vicinityBounds()));
   map.fitBounds(openingBounds, { padding: [24, 24] });
   L.control.scale({ imperial: false, position: 'bottomright' }).addTo(map);
 
@@ -143,134 +154,265 @@
       { sticky: true });
   }
 
-  /* ── the survey block ───────────────────────────────────────────────────────
+  /* ── survey blocks ──────────────────────────────────────────────────────────
    *
-   * The vicinity is tens of hectares; the drone flies one or two. The farm is
-   * somewhere inside and its exact position isn't known, so the operator finds it
-   * on the imagery and clicks. Everything the mission planner says — altitude,
-   * photo spacing, flight time, battery count — is scaled to this block, so
-   * getting it from a click on real imagery beats typing coordinates.
+   * The vicinity is tens of hectares; the drone flies one or two at a time. The
+   * farm sits somewhere inside it, its exact outline unknown, and it has several
+   * plots — so blocks are a *list* of rectangles, each drawn corner to corner and
+   * named. Everything the mission planner says is scaled to one of them, and the
+   * names are also the choices on the All flights filter.
+   *
+   * Two clicks rather than a centre and a size, because a plot is rarely square
+   * and "drag a box round it on the imagery" is how anyone would describe this.
    */
 
-  let blockLat = (survey.lat === null || survey.lat === undefined) ? null : survey.lat;
-  let blockLon = (survey.lon === null || survey.lon === undefined) ? null : survey.lon;
-  let blockSide = survey.side_m || 100;
-  let blockRect = null;
-  let picking = false;
-  // What was saved, so Cancel can put it back without a page reload.
-  const saved = { lat: blockLat, lon: blockLon, side: blockSide };
+  const BLOCK_COLOUR = '#f0a03c';
+  const layers = {};            // block id -> Leaflet rectangle
+  let drawing = false;
+  let firstCorner = null;       // {lat, lng} once the first corner is clicked
+  let pending = null;           // the rectangle being drawn
+  let rubber = null;            // live rectangle following the cursor
 
   const els = {
+    list: document.getElementById('block-list'),
+    empty: document.getElementById('block-empty'),
+    count: document.getElementById('block-count'),
     start: document.getElementById('block-start'),
     edit: document.getElementById('block-edit'),
-    size: document.getElementById('block-size'),
-    sizeLabel: document.getElementById('block-size-label'),
+    hint: document.getElementById('block-hint'),
     where: document.getElementById('block-where'),
+    name: document.getElementById('block-name'),
     save: document.getElementById('block-save'),
-    cancel: document.getElementById('block-cancel'),
-    clear: document.getElementById('block-clear')
+    cancel: document.getElementById('block-cancel')
   };
 
-  function drawBlock() {
-    if (blockRect) { blockRect.remove(); blockRect = null; }
-    if (blockLat === null) return;
-    blockRect = L.rectangle(squareBounds(blockLat, blockLon, blockSide), {
-      color: '#f0a03c', weight: 2.5, fillColor: '#f0a03c', fillOpacity: 0.12,
-      interactive: false
-    }).addTo(map);
-    blockRect.bindTooltip(
-      'The block you fly — ' + blockSide + ' m across, ' +
-      (blockSide * blockSide / 10000).toFixed(2) + ' ha', { sticky: true });
+  function boundsOf(b) {
+    return [[b.south, b.west], [b.north, b.east]];
   }
 
-  function paintBlockPanel() {
-    if (els.sizeLabel) els.sizeLabel.textContent = blockSide + ' m';
-    if (els.where) {
-      els.where.textContent = blockLat === null
-        ? 'not placed yet'
-        : blockLat.toFixed(5) + ', ' + blockLon.toFixed(5) +
-          ' · ' + (blockSide * blockSide / 10000).toFixed(2) + ' ha';
-    }
-    if (els.save) {
-      els.save.disabled = blockLat === null ||
-        (blockLat === saved.lat && blockLon === saved.lon && blockSide === saved.side);
-    }
-    if (els.clear) els.clear.hidden = saved.lat === null;
+  /** Metres across and down, and the area. Mirrors flights.block_dimensions(). */
+  function dimsOf(b) {
+    const midLat = (b.south + b.north) / 2;
+    const w = (b.east - b.west) * mPerDegLon(midLat);
+    const h = (b.north - b.south) * M_PER_DEG_LAT;
+    return { w: w, h: h, ha: w * h / 10000 };
   }
 
-  function setPicking(on) {
-    picking = on;
+  function describeBlock(b) {
+    const d = dimsOf(b);
+    return Math.round(d.w) + ' × ' + Math.round(d.h) + ' m · ' +
+      d.ha.toFixed(2) + ' ha';
+  }
+
+  function drawBlocks() {
+    Object.keys(layers).forEach(function (id) {
+      layers[id].remove();
+      delete layers[id];
+    });
+    blocks.forEach(function (b) {
+      const rect = L.rectangle(boundsOf(b), {
+        color: BLOCK_COLOUR, weight: 2.5, fillColor: BLOCK_COLOUR,
+        fillOpacity: 0.10, interactive: false
+      }).addTo(map);
+      // Name only. The dimensions are in the panel list, and repeating them here
+      // makes labels wide enough to collide once there are a few blocks.
+      rect.bindTooltip(b.name, {
+        permanent: true, direction: 'center', className: 'block-label'
+      });
+      layers[b.id] = rect;
+    });
+  }
+
+  function paintList() {
+    if (els.count) els.count.textContent = String(blocks.length);
+    if (els.empty) els.empty.hidden = blocks.length > 0;
+    if (!els.list) return;
+    els.list.innerHTML = blocks.map(function (b) {
+      return '<li class="block-item" data-id="' + esc(b.id) + '">' +
+        '<button class="block-zoom" data-id="' + esc(b.id) + '">' +
+        '<span class="block-name">' + esc(b.name) + '</span>' +
+        '<span class="block-dims">' + esc(describeBlock(b)) + '</span>' +
+        '</button>' +
+        '<button class="block-del" data-id="' + esc(b.id) +
+        '" title="Delete ' + esc(b.name) + '">\u00d7</button></li>';
+    }).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
+               "'": '&#39;' }[c];
+    });
+  }
+
+  /* ── drawing a new block ─────────────────────────────────────────────────── */
+
+  function setDrawing(on) {
+    drawing = on;
+    firstCorner = null;
+    pending = null;
+    if (rubber) { rubber.remove(); rubber = null; }
     if (els.edit) els.edit.hidden = !on;
     if (els.start) els.start.hidden = on;
     host.classList.toggle('is-picking', on);
-    paintBlockPanel();
+    if (on) {
+      /* You cannot draw a plot on a view tighter than a plot. Arriving from a
+         past flight the map is framed on ~60 m of ground, where a whole field
+         would be a couple of pixels tall — so pull back to something workable
+         first, rather than leaving the operator to guess why their box keeps
+         coming out "too small to fly". */
+      const view = map.getBounds();
+      const spanM = (view.getNorth() - view.getSouth()) * M_PER_DEG_LAT;
+      if (spanM < 200) {
+        map.fitBounds(allBlocksBounds() || vicinityBounds(), { padding: [24, 24] });
+      }
+      if (els.name) els.name.value = suggestName();
+      if (els.where) els.where.textContent = 'no corners yet';
+      if (els.hint) {
+        els.hint.textContent =
+          'Click one corner of the plot, then the opposite corner.';
+      }
+    }
+    if (els.save) els.save.disabled = true;
   }
 
-  if (els.start) els.start.addEventListener('click', function () { setPicking(true); });
+  /** "Block 3" when there are two. Editable, but never blank. */
+  function suggestName() {
+    const taken = blocks.map(function (b) { return b.name; });
+    let n = blocks.length + 1;
+    while (taken.indexOf('Block ' + n) !== -1) n++;
+    return 'Block ' + n;
+  }
+
+  function rectFrom(a, b) {
+    return {
+      south: Math.min(a.lat, b.lat), north: Math.max(a.lat, b.lat),
+      west: Math.min(a.lng, b.lng), east: Math.max(a.lng, b.lng)
+    };
+  }
+
+  function showRubber(box, dashed) {
+    if (rubber) rubber.remove();
+    rubber = L.rectangle(boundsOf(box), {
+      color: BLOCK_COLOUR, weight: 2, dashArray: dashed ? '5 5' : null,
+      fillColor: BLOCK_COLOUR, fillOpacity: 0.08, interactive: false
+    }).addTo(map);
+  }
+
+  function onDrawClick(latlng) {
+    if (!firstCorner) {
+      firstCorner = latlng;
+      if (els.hint) els.hint.textContent = 'Now click the opposite corner.';
+      if (els.where) els.where.textContent = 'first corner set';
+      return;
+    }
+    pending = rectFrom(firstCorner, latlng);
+    firstCorner = null;
+    const d = dimsOf(pending);
+    if (d.w < 5 || d.h < 5) {
+      // Two clicks in nearly the same spot is a slip, not a plot. Say so rather
+      // than saving something the server would reject anyway.
+      pending = null;
+      if (rubber) { rubber.remove(); rubber = null; }
+      if (els.hint) {
+        els.hint.textContent = 'That box is too small to fly. Click one corner, ' +
+          'then the opposite corner.';
+      }
+      if (els.where) els.where.textContent = 'no corners yet';
+      if (els.save) els.save.disabled = true;
+      return;
+    }
+    showRubber(pending, false);
+    if (els.where) els.where.textContent = describeBlock(pending);
+    if (els.hint) {
+      els.hint.textContent = 'Click again to redraw it, or name it and save.';
+    }
+    if (els.save) els.save.disabled = false;
+  }
+
+  /* ── persistence ─────────────────────────────────────────────────────────── */
+
+  /** The whole list goes over in one PATCH. It is a handful of rectangles, and
+   *  one round trip means the server's validation is the only arbiter of what a
+   *  valid block is. */
+  async function persist(next, what) {
+    try {
+      const res = await HC.api('/api/settings',
+        { method: 'PATCH', body: { survey_blocks: next } });
+      (res.warnings || []).forEach(function (w) { HC.toast(w, true); });
+      // Trust what came back: the server normalises corners, ids and names.
+      blocks = (res.settings && res.settings.survey_blocks) || next;
+      blocks = blocks.map(function (b) { return b; });
+      drawBlocks();
+      paintList();
+      note(what);
+      return true;
+    } catch (err) {
+      HC.toast('Could not save: ' + err.message, true);
+      return false;
+    }
+  }
+
+  if (els.start) {
+    els.start.addEventListener('click', function () { setDrawing(true); });
+  }
 
   if (els.cancel) {
     els.cancel.addEventListener('click', function () {
-      blockLat = saved.lat; blockLon = saved.lon; blockSide = saved.side;
-      if (els.size) els.size.value = blockSide;
-      drawBlock();
-      setPicking(false);
+      setDrawing(false);
       note(IDLE_HINT);
     });
   }
 
-  if (els.size) {
-    els.size.addEventListener('input', function () {
-      blockSide = parseInt(els.size.value, 10);
-      drawBlock();
-      paintBlockPanel();
-    });
-  }
-
-  async function saveBlock(patch) {
-    try {
-      const res = await HC.api('/api/settings', { method: 'PATCH', body: patch });
-      (res.warnings || []).forEach(function (w) { HC.toast(w, true); });
-    } catch (err) {
-      HC.toast('Could not save the block: ' + err.message, true);
-      return false;
-    }
-    saved.lat = patch.survey_lat;
-    saved.lon = patch.survey_lon;
-    saved.side = patch.survey_side_m;
-    return true;
-  }
-
   if (els.save) {
     els.save.addEventListener('click', async function () {
+      if (!pending) return;
       els.save.disabled = true;
-      const ok = await saveBlock({
-        survey_lat: blockLat, survey_lon: blockLon, survey_side_m: blockSide
-      });
-      if (!ok) { paintBlockPanel(); return; }
-      setPicking(false);
-      if (els.start) {
-        els.start.textContent = 'Move the block you fly';
+      const name = (els.name && els.name.value.trim()) || suggestName();
+      const next = blocks.concat([{
+        id: 'b' + Date.now().toString(36),
+        name: name,
+        south: pending.south, west: pending.west,
+        north: pending.north, east: pending.east
+      }]);
+      const ok = await persist(next,
+        name + ' saved — ' + describeBlock(pending) +
+        '. The mission planner on the New flight page can plan for it now.');
+      if (!ok) { els.save.disabled = false; return; }
+      setDrawing(false);
+    });
+  }
+
+  // Zoom to a block, or delete it. Delegated, because the list is re-rendered.
+  if (els.list) {
+    els.list.addEventListener('click', async function (e) {
+      const zoom = e.target.closest('.block-zoom');
+      const del = e.target.closest('.block-del');
+      if (zoom) {
+        const b = blocks.find(function (x) { return x.id === zoom.dataset.id; });
+        if (b) {
+          map.fitBounds(boundsOf(b), { padding: [40, 40] });
+          note(b.name + ' — ' + describeBlock(b));
+        }
+        return;
       }
-      note('Block saved — ' + (blockSide * blockSide / 10000).toFixed(2) +
-           ' ha. The mission planner on the New flight page now plans for it.');
-    });
-  }
-
-  if (els.clear) {
-    els.clear.addEventListener('click', async function () {
-      const ok = await saveBlock({
-        survey_lat: null, survey_lon: null, survey_side_m: blockSide
+      if (!del) return;
+      const b = blocks.find(function (x) { return x.id === del.dataset.id; });
+      if (!b) return;
+      const yes = await HC.confirmDialog({
+        title: 'Delete ' + b.name + '?',
+        body: 'The block is removed from the map and from the All flights ' +
+              'filter. Flights already recorded under this name keep it.',
+        action: 'Delete'
       });
-      if (!ok) return;
-      blockLat = blockLon = null;
-      drawBlock();
-      setPicking(false);
-      if (els.start) els.start.textContent = 'Mark the block you fly';
-      note('Block unmarked. The mission planner falls back to a placeholder size.');
+      if (!yes) return;
+      await persist(blocks.filter(function (x) { return x.id !== b.id; }),
+                    b.name + ' deleted.');
     });
   }
 
-  drawBlock();
+  drawBlocks();
+  paintList();
 
   /* ── photo mosaic ───────────────────────────────────────────────────────── */
 
@@ -567,19 +709,21 @@
   }
 
   map.on('mousemove', function (e) {
-    if (picking) return;                 // the picker owns the hint while it's up
+    if (drawing) {
+      // Rubber-band the box out from the first corner so the size is visible
+      // before committing to the second click.
+      if (firstCorner) {
+        const box = rectFrom(firstCorner, e.latlng);
+        showRubber(box, true);
+        if (els.where) els.where.textContent = describeBlock(box);
+      }
+      return;                            // the picker owns the hint while it's up
+    }
     note(describe(e.latlng));
   });
-  map.on('mouseout', function () { if (!picking) note(IDLE_HINT); });
+  map.on('mouseout', function () { if (!drawing) note(IDLE_HINT); });
   map.on('click', function (e) {
-    if (picking) {
-      blockLat = e.latlng.lat;
-      blockLon = e.latlng.lng;
-      drawBlock();
-      paintBlockPanel();
-      note('Block centred here. Adjust the size, then Save.');
-      return;
-    }
+    if (drawing) { onDrawClick(e.latlng); return; }
     note(describe(e.latlng));
   });
 

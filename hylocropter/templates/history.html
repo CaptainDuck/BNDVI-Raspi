@@ -17,9 +17,15 @@
 
 <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:18px" id="block-filters">
   <button class="pill is-active" data-block="All">All</button>
-  {% for block in cfg.blocks %}
+  {# The names of the blocks drawn on the farm map. Naming an area there is what
+     puts it here — there is no separate list to keep in step. #}
+  {% for block in block_names %}
     <button class="pill" data-block="{{ block }}">{{ block }}</button>
   {% endfor %}
+  {% if not blocks %}
+    <a class="pill is-dashed" href="{{ url_for('page_map') }}">
+      Draw your plots on the map →</a>
+  {% endif %}
 </div>
 
 {% if flights %}

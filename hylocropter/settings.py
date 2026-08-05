@@ -18,6 +18,7 @@ import threading
 from pathlib import Path
 
 import bndvi
+import flights          # block geometry only; flights.py does not import this
 
 # Resolutions offered in the UI. The mockup's segmented control shows three.
 RESOLUTIONS = [(640, 480), (1280, 960), (3280, 2464)]
@@ -66,16 +67,24 @@ DEFAULTS = {
     "plot_lon": 121.0768,
     "plot_box_m": 620,                   # ~38 ha of imagery to search within
 
-    # ── the survey block ──────────────────────────────────────────────────
-    # The patch inside that vicinity the drone actually flies. Unknown until the
-    # operator finds the farm on the imagery and marks it, which is why the
-    # centre is null rather than a guess -- a made-up centre would silently plan
-    # a mission over the wrong ground.
-    "survey_lat": None,
-    "survey_lon": None,
-    "survey_side_m": 100,                # 1 ha; a sane first block, not the farm
+    # ── the survey blocks ─────────────────────────────────────────────────
+    # The patches inside that vicinity the drone actually flies. A list, because
+    # a farm has several plots, and rectangles rather than squares, because real
+    # plots are not square. Each entry:
+    #
+    #   {"id": "b1", "name": "North block",
+    #    "south": .., "west": .., "north": .., "east": ..}
+    #
+    # Empty until the operator finds the farm on the imagery and draws a block --
+    # a made-up default would silently plan a mission over the wrong ground.
+    # The names here are also the choices on the All flights filter, so naming a
+    # block on the map is what puts it there.
+    "survey_blocks": [],
     "farm_name": "Dragon fruit farm",
     "farm_location": "Tanauan, Batangas",
+    # Legacy fallback for the flight-name and history filter before any block has
+    # been drawn. Superseded by survey_blocks; kept so old settings.json files and
+    # old flight records keep their labels.
     "blocks": ["North block", "South block", "East trellises", "West rows",
                "Whole farm"],
 
@@ -116,9 +125,6 @@ _LIMITS = {
     "plot_lat": (-90.0, 90.0),
     "plot_lon": (-180.0, 180.0),
     "plot_box_m": (100, 4000),
-    "survey_lat": (-90.0, 90.0),
-    "survey_lon": (-180.0, 180.0),
-    "survey_side_m": (10, 2000),
     "trigger_distance_m": (1, 200),
     "trigger_interval_s": (1, 120),
     "mavlink_baud": (1200, 921_600),
@@ -126,18 +132,44 @@ _LIMITS = {
     "tile_zoom_max": (10, 21),
 }
 
-_INTS = {"exposure_us", "preview_fps", "plot_box_m", "survey_side_m",
+_INTS = {"exposure_us", "preview_fps", "plot_box_m",
          "trigger_distance_m", "trigger_interval_s", "mavlink_baud",
          "tile_zoom_min", "tile_zoom_max", "setup_step"}
 
-# Settings whose default is None and which stay None until something real is
-# known. Clearing one back to "unknown" is a legitimate edit -- the survey block
-# has to be un-markable again once the operator realises they marked the wrong
-# field -- so null passes validation instead of being coerced to the string
-# "None", which is what the generic float path would do.
-_NULLABLE = {"survey_lat", "survey_lon"}
+# No more than this many survey blocks. Not a real constraint on anyone's farm --
+# it stops a runaway client turning settings.json into something the Pi has to
+# parse on every page load.
+MAX_SURVEY_BLOCKS = 24
 
 _lock = threading.Lock()
+
+
+def _migrate(stored):
+    """Bring an older settings.json forward.
+
+    The survey area was briefly a single square -- `survey_lat`, `survey_lon` and
+    `survey_side_m`. It is now a list of named rectangles, because a farm has
+    several plots and none of them are square. A square that had been marked is
+    carried over as one block rather than being silently discarded; the old keys
+    then disappear on the next save, because `load()` only keeps keys in DEFAULTS.
+    """
+    if stored.get("survey_blocks") or stored.get("survey_lat") is None:
+        return stored
+    try:
+        lat = float(stored["survey_lat"])
+        lon = float(stored["survey_lon"])
+        half = float(stored.get("survey_side_m") or 100) / 2.0
+    except (KeyError, TypeError, ValueError):
+        return stored
+    d_lat = half / flights.M_PER_DEG_LAT
+    d_lon = half / flights.m_per_deg_lon(lat)
+    stored = dict(stored)
+    stored["survey_blocks"] = [{
+        "id": "b1", "name": (stored.get("blocks") or ["Block 1"])[0],
+        "south": lat - d_lat, "north": lat + d_lat,
+        "west": lon - d_lon, "east": lon + d_lon,
+    }]
+    return stored
 
 
 class Settings:
@@ -159,11 +191,19 @@ class Settings:
             # A corrupt settings file must not stop the dashboard booting.
             return self._values
         if isinstance(stored, dict):
+            stored = _migrate(stored)
             # Unknown keys are dropped; missing keys keep their default. That
             # makes adding a setting a non-event for existing installs.
             for key in DEFAULTS:
                 if key in stored:
                     self._values[key] = stored[key]
+            # Blocks come off disk through the same validation as an API patch --
+            # a hand-edited or half-written file must not reach the map.
+            try:
+                self._values["survey_blocks"] = self._coerce(
+                    "survey_blocks", self._values["survey_blocks"])
+            except (TypeError, ValueError):
+                self._values["survey_blocks"] = []
         return self._values
 
     def save(self):
@@ -230,10 +270,23 @@ class Settings:
 
     def _coerce(self, key, raw):
         default = DEFAULTS[key]
-        if key in _NULLABLE:
-            if raw is None or (isinstance(raw, str) and not raw.strip()):
-                return None
-            return float(raw)
+        if key == "survey_blocks":
+            if raw is None:
+                return []
+            if not isinstance(raw, (list, tuple)):
+                raise ValueError("survey_blocks must be a list")
+            out, seen = [], set()
+            for i, entry in enumerate(raw[:MAX_SURVEY_BLOCKS]):
+                block = flights.normalise_block(entry, index=i)
+                if block is None:
+                    continue                      # a stray click, not a plot
+                # Ids have to be unique or the planner and the map disagree about
+                # which block is selected.
+                while block["id"] in seen:
+                    block["id"] += "_"
+                seen.add(block["id"])
+                out.append(block)
+            return out
         if key == "resolution":
             if isinstance(raw, str) and "x" in raw.lower().replace("×", "x"):
                 w, h = raw.lower().replace("×", "x").split("x")
@@ -259,6 +312,17 @@ class Settings:
         return str(raw)
 
     # ── derived helpers ───────────────────────────────────────────────────
+
+    def block_names(self):
+        """Names for the All flights filter and the default flight name.
+
+        Drawn blocks win: naming an area on the map is what puts it in the filter,
+        so there is one place to manage them. `blocks` is only the fallback for an
+        install where nothing has been drawn yet -- otherwise the filter would
+        offer five names that correspond to no ground.
+        """
+        drawn = [b["name"] for b in self._values.get("survey_blocks") or []]
+        return drawn or list(self._values.get("blocks") or [])
 
     def camera_kwargs(self):
         """The kwargs bndvi.capture_image / capture_and_analyse expect.

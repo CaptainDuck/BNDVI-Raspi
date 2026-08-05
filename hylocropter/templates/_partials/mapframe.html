@@ -10,8 +10,7 @@
          data-pins='{{ (pins or [])|tojson }}'
          data-vicinity='{{ {"lat": cfg.plot_lat, "lon": cfg.plot_lon,
                             "box_m": cfg.plot_box_m}|tojson }}'
-         data-survey='{{ {"lat": cfg.survey_lat, "lon": cfg.survey_lon,
-                          "side_m": cfg.survey_side_m}|tojson }}'></div>
+         data-blocks='{{ blocks|tojson }}'></div>
 
     {% if flight %}
       <div class="map-overlay-panel map-legend hc-noprint">
@@ -58,30 +57,50 @@
         </label>
       {% endif %}
 
-      {# ── survey block picker ──────────────────────────────────────────── #}
+      {# ── survey blocks ────────────────────────────────────────────────────
+         A farm has several plots and none of them are square, so this is a list
+         of named rectangles drawn corner to corner. The names are also the
+         choices on the All flights filter. #}
       <div class="map-block">
-        <button class="btn btn-secondary btn-sm" id="block-start">
-          {{ 'Move the block you fly' if cfg.survey_lat is not none
-             else 'Mark the block you fly' }}</button>
+        <div class="map-block-head">
+          <span>Blocks you fly</span>
+          <span class="map-block-count" id="block-count">{{ blocks|length }}</span>
+        </div>
+
+        <ul class="block-list" id="block-list">
+          {% for b in blocks %}
+            <li class="block-item" data-id="{{ b.id }}">
+              <button class="block-zoom" data-id="{{ b.id }}"
+                      title="Zoom to {{ b.name }}">
+                <span class="block-name">{{ b.name }}</span>
+                <span class="block-dims">{{ b.width_m|round|int }} ×
+                  {{ b.height_m|round|int }} m · {{ '%.2f'|format(b.area_ha) }} ha</span>
+              </button>
+              <button class="block-del" data-id="{{ b.id }}"
+                      title="Delete {{ b.name }}" aria-label="Delete {{ b.name }}">×</button>
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="map-block-empty" id="block-empty" {{ 'hidden' if blocks }}>
+          Nothing marked yet. Find the dragon fruit rows on the imagery, then draw
+          a box around one plot.
+        </p>
+
+        <button class="btn btn-secondary btn-sm" id="block-start">Add a block</button>
+
         <div id="block-edit" hidden>
-          <div class="map-block-hint">Click the middle of the dragon fruit rows.</div>
-          <label class="map-block-size">
-            <span>Block size</span>
-            <span class="val" id="block-size-label">{{ cfg.survey_side_m }} m</span>
-          </label>
-          <input type="range" id="block-size" min="20" max="600" step="10"
-                 value="{{ cfg.survey_side_m }}" aria-label="Survey block size">
-          <div class="map-block-where" id="block-where">
-            {% if cfg.survey_lat is not none %}
-              {{ '%.5f, %.5f'|format(cfg.survey_lat, cfg.survey_lon) }}
-            {% else %}not placed yet{% endif %}
+          <div class="map-block-hint" id="block-hint">
+            Click one corner of the plot, then the opposite corner.</div>
+          <div class="map-block-where" id="block-where">no corners yet</div>
+          <div class="field">
+            <label for="block-name">Name it</label>
+            <input class="input input-sm" id="block-name" maxlength="60"
+                   placeholder="North block">
           </div>
           <div class="map-block-buttons">
             <button class="btn btn-primary btn-sm" id="block-save" disabled>Save</button>
             <button class="btn btn-ghost btn-sm" id="block-cancel">Cancel</button>
           </div>
-          <button class="btn btn-ghost btn-sm" id="block-clear"
-                  {{ 'hidden' if cfg.survey_lat is none }}>Unmark</button>
         </div>
       </div>
     </div>

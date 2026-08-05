@@ -354,7 +354,8 @@ def test_plan_clamps_nonsense_inputs_rather_than_crashing():
     assert plan["altitude_m"] >= 1
     assert 0 <= plan["forward_overlap_pct"] <= 90
     assert 0 <= plan["side_overlap_pct"] <= 90
-    assert plan["plot_side_m"] >= 10
+    assert plan["plot_w_m"] >= 10
+    assert plan["plot_h_m"] >= 10
     assert plan["photos"] >= 1
 
 
@@ -363,6 +364,128 @@ def test_plan_reports_gsd_from_the_capture_resolution():
     lo = flights.mission_plan(12, resolution=(640, 480))
     assert hi["gsd_cm"] < lo["gsd_cm"]
     assert hi["gsd_cm"] == pytest.approx(0.44, abs=0.01)
+
+
+def test_lines_run_along_the_longer_axis():
+    """Each turn costs battery and altitude hold, so a strip is flown the long
+    way: 6 lines and 5 turns rather than 20 lines and 19 turns for the same
+    ground."""
+    long_way = flights.mission_plan(12, plot_w_m=200, plot_h_m=60)
+    assert long_way["line_direction"] == "east–west"
+    assert long_way["lines"] == pytest.approx(6, abs=1)
+
+    # the same rectangle stood on end plans the same number of lines, just the
+    # other way round -- the maths must not depend on which axis is which
+    on_end = flights.mission_plan(12, plot_w_m=60, plot_h_m=200)
+    assert on_end["line_direction"] == "north–south"
+    assert on_end["lines"] == long_way["lines"]
+    assert on_end["photos"] == long_way["photos"]
+    assert on_end["minutes"] == pytest.approx(long_way["minutes"], abs=0.1)
+
+
+def test_flying_a_strip_the_wrong_way_would_cost_more_turns():
+    """Guards the choice above: stepping along the long axis really is worse."""
+    plan = flights.mission_plan(12, plot_w_m=200, plot_h_m=60)
+    spacing = plan["line_spacing_m"]
+    wrong_way_lines = math.ceil(200 / spacing)
+    assert wrong_way_lines > plan["lines"] * 2
+
+
+def test_a_square_shorthand_still_works():
+    square = flights.mission_plan(12, plot_side_m=100)
+    explicit = flights.mission_plan(12, plot_w_m=100, plot_h_m=100)
+    assert square["photos"] == explicit["photos"]
+    assert square["plot_area_ha"] == explicit["plot_area_ha"]
+
+
+def test_area_is_width_times_height():
+    plan = flights.mission_plan(12, plot_w_m=200, plot_h_m=50)
+    assert plan["plot_area_ha"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_plan_falls_back_to_the_placeholder_when_nothing_is_drawn():
+    plan = flights.mission_plan(12)
+    assert plan["plot_w_m"] == flights.PLACEHOLDER_BLOCK_M
+    assert plan["plot_h_m"] == flights.PLACEHOLDER_BLOCK_M
+
+
+# ── block geometry ──────────────────────────────────────────────────────────
+
+def rect(south=14.1250, west=121.0750, north=14.1259, east=121.0764, **kw):
+    base = {"id": "b1", "name": "North block", "south": south, "west": west,
+            "north": north, "east": east}
+    base.update(kw)
+    return base
+
+
+def test_block_dimensions_are_metres_on_the_ground():
+    dims = flights.block_dimensions(rect())
+    # 0.0009 deg of latitude is ~100 m; 0.0014 deg of longitude at 14.1 N is ~151 m
+    assert dims["height_m"] == pytest.approx(100, abs=2)
+    assert dims["width_m"] == pytest.approx(151, abs=2)
+    assert dims["area_ha"] == pytest.approx(1.51, abs=0.05)
+
+
+def test_longitude_shrinks_toward_the_poles():
+    """A degree of longitude is 111 km at the equator and nothing at the pole. Get
+    this wrong and every block is the wrong width."""
+    assert flights.m_per_deg_lon(0) == pytest.approx(111_320, abs=1)
+    assert flights.m_per_deg_lon(60) == pytest.approx(55_660, abs=100)
+    assert flights.m_per_deg_lon(14.1) == pytest.approx(108_000, abs=500)
+    # and it never reaches zero, so no division blows up at the pole
+    assert flights.m_per_deg_lon(90) > 0
+
+
+def test_normalise_sorts_corners_clicked_in_any_order():
+    out = flights.normalise_block(rect(south=14.1259, north=14.1250,
+                                       west=121.0764, east=121.0750))
+    assert out["south"] < out["north"]
+    assert out["west"] < out["east"]
+
+
+def test_normalise_rejects_a_block_too_small_to_fly():
+    assert flights.normalise_block(
+        rect(north=14.12501, east=121.07501)) is None
+
+
+@pytest.mark.parametrize("bad", [
+    None, "north block", 42, {}, {"south": 14.1}, {"south": "x", "west": 1,
+                                                   "north": 2, "east": 3},
+])
+def test_normalise_rejects_junk(bad):
+    assert flights.normalise_block(bad) is None
+
+
+def test_normalise_names_an_unnamed_block_by_position():
+    out = flights.normalise_block({"south": 14.1250, "west": 121.0750,
+                                   "north": 14.1259, "east": 121.0764},
+                                  index=2)
+    assert out["name"] == "Block 3"
+    assert out["id"] == "b3"
+
+
+def test_normalise_clamps_impossible_coordinates():
+    out = flights.normalise_block({"south": -400, "north": 400,
+                                   "west": -900, "east": 900, "name": "Earth"})
+    assert out["south"] >= -90 and out["north"] <= 90
+    assert out["west"] >= -180 and out["east"] <= 180
+
+
+def test_block_by_id_finds_the_right_one():
+    blocks = [rect(id="b1"), rect(id="b2", name="South")]
+    assert flights.block_by_id(blocks, "b2")["name"] == "South"
+    assert flights.block_by_id(blocks, "nope") is None
+    assert flights.block_by_id(None, "b1") is None
+
+
+def test_a_drawn_block_plans_a_flight_that_fits_a_battery():
+    """End to end: draw a 1.5 ha plot, and the plan for it is one short flight."""
+    dims = flights.block_dimensions(rect())
+    plan = flights.mission_plan(12, plot_w_m=dims["width_m"],
+                               plot_h_m=dims["height_m"])
+    assert plan["plot_area_ha"] == pytest.approx(1.51, abs=0.05)
+    assert plan["minutes"] < flights.USABLE_FLIGHT_MINUTES
+    assert not plan["warnings"]
 
 
 # ── plain-language summary ───────────────────────────────────────────────────

@@ -208,26 +208,62 @@
 .map-opacity input[type="range"] { height: 22px; flex: 1; }
 .map-toggle input { width: 15px; height: 15px; accent-color: var(--color-accent); }
 
-/* the survey-block picker: "which of this neighbourhood do I actually fly?" */
+/* the survey blocks: "which parts of this neighbourhood do I actually fly?" */
 .map-block { display: flex; flex-direction: column; gap: 7px; }
 .map-block > .btn { width: 100%; }
+.map-block-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+.map-block-count {
+  background: var(--color-accent-200); color: var(--color-accent-800);
+  border-radius: 999px; padding: 1px 7px; letter-spacing: 0;
+}
+.block-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 190px; overflow-y: auto; }
+.block-item { display: flex; align-items: stretch; gap: 2px; }
+.block-zoom {
+  flex: 1; display: flex; flex-direction: column; gap: 1px; text-align: left;
+  cursor: pointer; border: 0; background: transparent; border-radius: 12px;
+  padding: 5px 8px; font-family: var(--font-body); color: var(--color-text);
+}
+.block-zoom:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+.block-name { font-size: 13px; }
+.block-dims { font-size: 11px; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent); }
+.block-del {
+  cursor: pointer; border: 0; background: transparent; border-radius: 10px;
+  width: 26px; font-size: 17px; line-height: 1;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+.block-del:hover { background: var(--color-accent-200); color: var(--color-accent-800); }
+.map-block-empty { margin: 0; font-size: 11.5px; line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+
 #block-edit { display: flex; flex-direction: column; gap: 7px; }
 .map-block-hint { font-size: 11.5px; line-height: 1.35;
   color: color-mix(in srgb, var(--color-text) 65%, transparent); }
-.map-block-size {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 11.5px; color: color-mix(in srgb, var(--color-text) 65%, transparent);
-}
-#block-size { height: 22px; }
 .map-block-where {
   font-size: 12px; font-variant-numeric: tabular-nums;
   color: var(--color-accent-800);
 }
+.input-sm { min-height: 32px; padding: 5px 10px; font-size: 13px; }
 .map-block-buttons { display: flex; gap: 6px; }
 .map-block-buttons .btn { flex: 1; }
-/* Crosshair while placing, so it is obvious the next click puts the block down
-   rather than reading a value out of the map. */
+/* Crosshair while drawing, so it is obvious the next click sets a corner rather
+   than reading a value out of the map. */
 #plot-map.is-picking, #plot-map.is-picking .leaflet-grab { cursor: crosshair; }
+
+/* Block names sit on the map itself — with several plots, a legend you have to
+   cross-reference defeats the point of drawing them. */
+.block-label.leaflet-tooltip {
+  background: rgba(245, 234, 216, .88); border: 0; box-shadow: none;
+  color: var(--color-accent-900, #4a2408); font-size: 11.5px; font-weight: 500;
+  padding: 2px 7px; border-radius: 8px; white-space: nowrap;
+}
+.block-label.leaflet-tooltip::before { display: none; }
 
 /* Nearest-neighbour so the mosaic shows the pixels as measured rather than a
    browser-smoothed guess — at 0.4 cm per pixel there is real detail in there. */

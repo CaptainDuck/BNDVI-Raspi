@@ -57,12 +57,12 @@ def test_every_page_renders_with_no_hardware(client, path):
 
 def test_the_map_page_renders_before_the_first_flight(client):
     """It used to be a dead end: no map, and no way to start flying. Now it is
-    where you go looking for the farm on the satellite imagery."""
+    where you go looking for the farm on the satellite imagery and draw plots."""
     body = client.get("/").data.decode()
     assert 'id="plot-map"' in body
     assert "data-vicinity=" in body
-    assert "data-survey=" in body
-    assert "block you fly" in body
+    assert "data-blocks=" in body
+    assert "Add a block" in body
 
 
 def test_the_map_page_says_the_drone_is_not_connected(client):
@@ -118,22 +118,31 @@ def test_settings_get_returns_every_key(client):
     assert set(body) >= set(settings_mod.DEFAULTS)
 
 
-def test_marking_the_survey_block_over_the_api(client):
-    res = client.patch("/api/settings", json={"survey_lat": 14.1262,
-                                              "survey_lon": 121.0759,
-                                              "survey_side_m": 140})
+def test_drawing_blocks_over_the_api(client):
+    res = client.patch("/api/settings", json={"survey_blocks": [
+        {"id": "b1", "name": "North block", "south": 14.1250, "west": 121.0750,
+         "north": 14.1259, "east": 121.0764},
+        {"id": "b2", "name": "South rows", "south": 14.1230, "west": 121.0750,
+         "north": 14.1242, "east": 121.0764},
+    ]})
     assert res.status_code == 200
     body = res.get_json()
-    assert body["applied"]["survey_side_m"] == 140
+    assert len(body["applied"]["survey_blocks"]) == 2
     assert not body["warnings"]
 
-    # and the map page now hands it to Leaflet
-    assert '"lat": 14.1262' in client.get("/").data.decode()
+    # the map page hands them to Leaflet, with dimensions worked out server-side
+    page = client.get("/").data.decode()
+    assert "North block" in page
+    assert "width_m" in page
 
-    # unmarking works too
-    res = client.patch("/api/settings", json={"survey_lat": None,
-                                              "survey_lon": None})
-    assert res.get_json()["applied"] == {"survey_lat": None, "survey_lon": None}
+    # and they became the All flights filter choices
+    history = client.get("/history").data.decode()
+    assert 'data-block="North block"' in history
+    assert 'data-block="South rows"' in history
+
+    # clearing works too
+    res = client.patch("/api/settings", json={"survey_blocks": []})
+    assert res.get_json()["applied"] == {"survey_blocks": []}
 
 
 def test_a_bad_setting_is_reported_not_500(client):
@@ -158,15 +167,31 @@ def test_the_mission_plan_endpoint_survives_junk_query_values(client):
     assert res.get_json()["photos"] >= 1
 
 
-def test_the_new_flight_page_plans_for_the_marked_block(client):
-    client.patch("/api/settings", json={"survey_lat": 14.1262,
-                                        "survey_lon": 121.0759,
-                                        "survey_side_m": 120})
+def test_the_new_flight_page_plans_for_a_drawn_block(client):
+    client.patch("/api/settings", json={"survey_blocks": [
+        {"id": "b1", "name": "North block", "south": 14.1250, "west": 121.0750,
+         "north": 14.1259, "east": 121.0764},
+    ]})
     body = client.get("/new-flight").data.decode()
-    assert "block you marked" in body
-    assert 'value="120"' in body
-    client.patch("/api/settings", json={"survey_lat": None, "survey_lon": None})
-    assert "No block marked yet" in client.get("/new-flight").data.decode()
+    assert 'id="mp-block"' in body                  # the block picker
+    assert "North block" in body
+    assert 'id="mp-plot-w"' in body and 'id="mp-plot-h"' in body
+
+    client.patch("/api/settings", json={"survey_blocks": []})
+    assert "No blocks drawn yet" in client.get("/new-flight").data.decode()
+
+
+def test_the_plan_endpoint_resolves_a_block_id(client):
+    """Passing an id means the server uses the block's real dimensions rather
+    than trusting numbers the page sent."""
+    client.patch("/api/settings", json={"survey_blocks": [
+        {"id": "b1", "name": "Strip", "south": 14.1250, "west": 121.0750,
+         "north": 14.1256, "east": 121.0790},
+    ]})
+    plan = client.get("/api/mission/plan?altitude_m=12&block=b1").get_json()
+    assert plan["plot_w_m"] > plan["plot_h_m"] * 3       # a long strip
+    assert plan["line_direction"] == "east–west"         # flown the long way
+    client.patch("/api/settings", json={"survey_blocks": []})
 
 
 # ── captures ─────────────────────────────────────────────────────────────────

@@ -483,19 +483,28 @@ and made it editable from the map.
 I could not verify the Altura Bata coordinate independently — the geocoding services were
 blocked, so it comes from a search result, and it's a *barangay centroid*, not your plot.
 
-**This is why the UI now separates a vicinity from a survey block.** The 54.9 ha of
+**This is why the UI separates a vicinity from the survey blocks.** The 54.9 ha of
 downloaded imagery is a neighbourhood that *contains* the farm; the farm's own outline is
 unknown, so the dashboard makes you go and find it. The farm map renders the vicinity
-before any flight exists, and *Mark the block you fly* stores a centre and a size
-(`survey_lat` / `survey_lon` / `survey_side_m`) that the mission planner then plans for.
-Unmarked, it stays `null` rather than defaulting to the barangay centroid — a made-up
-centre would have quietly produced a mission over the wrong ground.
+before any flight exists, and *Add a block* records a named rectangle drawn corner to
+corner (`survey_blocks`) that the mission planner then plans for. The list starts **empty**
+rather than defaulting to the barangay centroid — a made-up rectangle would have quietly
+produced a mission over the wrong ground.
 
-**To close:** open the farm map, find the dragon fruit rows on the satellite view and mark
-the block; or stand in the field, read the coordinates off the dashboard, and set them from
-**Settings**. Then reconcile the barangay name with the paper before the defense — an
-examiner reading both will notice. If the rows turn out to lie outside the 54.9 ha, move the
-vicinity centre and re-download.
+Rectangles, and a list of them, because neither assumption held: the plots are not square,
+and there is more than one. The names given to them are also the choices on the All flights
+filter, so a flight is labelled with a block that corresponds to real ground.
+
+**To close:** open the farm map, find the dragon fruit rows on the satellite view and draw a
+box round each plot; or stand in the field, read the coordinates off the dashboard, and
+place them from there. Then reconcile the barangay name with the paper before the defense —
+an examiner reading both will notice. If the rows turn out to lie outside the 54.9 ha, move
+the vicinity centre in Settings and re-download.
+
+Worth recording for the writeup: **the thesis does not name or delimit any plots either.**
+It says the drone will fly "the farm" without stating its extent, so the block list is the
+implementation's answer to a question the paper leaves open. Whatever you draw is the
+defensible statement of what was actually surveyed.
 
 ---
 

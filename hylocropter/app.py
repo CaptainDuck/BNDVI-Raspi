@@ -99,7 +99,7 @@ def _on_arm_change(armed, snapshot):
         if _recording_flight() is None:
             mission = snapshot.get("mission") or {}
             flight = store.open_flight(
-                name=(config.get("blocks") or ["Whole farm"])[0],
+                name=(config.block_names() or ["Whole farm"])[0],
                 trigger=("mission" if config.get("trigger_source") == "mission"
                          else config.get("trigger_mode", "distance")),
                 mission={"waypoints": mission.get("count"),
@@ -173,7 +173,21 @@ def _shell():
         "banner": banner,
         "dev_mode": app.config["DEV_MODE"],
         "recording": _recording_flight(),
+        # The drawn blocks, with their real dimensions worked out, plus just the
+        # names for the All flights filter. Both derived rather than stored, so
+        # renaming a block on the map updates the filter with nothing to sync.
+        "blocks": _blocks_with_dims(),
+        "block_names": config.block_names(),
     }
+
+
+def _blocks_with_dims():
+    out = []
+    for block in config.get("survey_blocks") or []:
+        entry = dict(block)
+        entry.update(flights_mod.block_dimensions(block))
+        out.append(entry)
+    return out
 
 
 # ── pages ────────────────────────────────────────────────────────────────────
@@ -274,19 +288,21 @@ def page_new_flight():
         legs = max(1, mission["count"] - 1)
         est_photos = int(legs * mission["line_spacing_m"]
                          / max(1, config.get("trigger_distance_m")))
-    # The planner scales everything to the block the operator marked on the map,
-    # not to the whole downloaded vicinity -- that is tens of hectares of imagery
-    # to search in, and planning a mission over all of it would suggest an hour in
-    # the air for ground the drone was never going to cover.
+    # The planner scales everything to one drawn block, not to the whole
+    # downloaded vicinity -- that is tens of hectares of imagery to search in, and
+    # planning a mission over all of it would suggest an hour in the air for
+    # ground the drone was never going to cover.
+    blocks = _blocks_with_dims()
+    first = blocks[0] if blocks else None
     plan = flights_mod.mission_plan(
         altitude_m=snap["mission"].get("altitude_m") or 12,
         fov_h_deg=config.get("fov_h_deg"), fov_v_deg=config.get("fov_v_deg"),
-        plot_side_m=config.get("survey_side_m"),
+        plot_w_m=first["width_m"] if first else None,
+        plot_h_m=first["height_m"] if first else None,
         resolution=tuple(config.get("resolution")))
     return render_template("newflight.html", view="newflight", checks=checks,
                            storage=storage, est_photos=est_photos, plan=plan,
-                           block_marked=config.get("survey_lat") is not None,
-                           **_shell())
+                           selected_block=first, **_shell())
 
 
 @app.route("/processing")
@@ -474,7 +490,7 @@ def api_flight_create():
     payload = request.get_json(silent=True) or {}
     mission = tel.snapshot().get("mission") or {}
     flight = store.open_flight(
-        name=payload.get("name") or (config.get("blocks")
+        name=payload.get("name") or (config.block_names()
                                      or ["Whole farm"])[0],
         trigger=payload.get("trigger") or config.get("trigger_mode"),
         mission={"waypoints": mission.get("count"),
@@ -726,13 +742,24 @@ def api_mission_plan():
             return float(request.args.get(name, default))
         except (TypeError, ValueError):
             return float(default)
+    # A block id resolves to that block's real dimensions; explicit width and
+    # height let the page recompute while the operator is still dragging, before
+    # anything is saved.
+    block = flights_mod.block_by_id(config.get("survey_blocks"),
+                                    request.args.get("block"))
+    if block:
+        dims = flights_mod.block_dimensions(block)
+        plot_w, plot_h = dims["width_m"], dims["height_m"]
+    else:
+        plot_w = num("plot_w", flights_mod.PLACEHOLDER_BLOCK_M)
+        plot_h = num("plot_h", plot_w)
     plan = flights_mod.mission_plan(
         altitude_m=num("altitude", 12),
         fov_h_deg=config.get("fov_h_deg"),
         fov_v_deg=config.get("fov_v_deg"),
         forward_overlap=num("forward", 0.40),
         side_overlap=num("side", 0.30),
-        plot_side_m=num("plot_side", 100),
+        plot_w_m=plot_w, plot_h_m=plot_h,
         speed_ms=num("speed", flights_mod.DEFAULT_SURVEY_SPEED_MS),
         resolution=tuple(config.get("resolution")),
     )

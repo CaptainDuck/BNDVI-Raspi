@@ -530,6 +530,75 @@ def ground_sampling_distance_cm(geo, resolution, fov_h_deg=62.2):
     return round(fp["width_m"] / max(1, resolution[0]) * 100, 2)
 
 
+# ── survey blocks ────────────────────────────────────────────────────────────
+# A block is a named rectangle inside the downloaded vicinity: the ground one
+# flight actually covers. Real plots are not squares and a farm has several of
+# them, so this is a list of bounds rather than a centre and a side length.
+
+M_PER_DEG_LAT = 111_320.0
+# Placeholder used when nothing has been marked yet. Deliberately modest, and the
+# UI says out loud that it is a placeholder rather than anyone's field.
+PLACEHOLDER_BLOCK_M = 100
+
+
+def m_per_deg_lon(lat):
+    """Metres per degree of longitude at a latitude. Shrinks toward the poles."""
+    return M_PER_DEG_LAT * max(0.01, math.cos(math.radians(lat)))
+
+
+def normalise_block(block, index=0):
+    """Validate and tidy one block. Returns None if it isn't usable.
+
+    Corners arrive in whatever order they were clicked, so south/north and
+    west/east get sorted here rather than trusting the caller. A block smaller
+    than a single photo footprint is a stray double-click, not a plot.
+    """
+    if not isinstance(block, dict):
+        return None
+    try:
+        south = min(90.0, max(-90.0, float(block["south"])))
+        north = min(90.0, max(-90.0, float(block["north"])))
+        west = min(180.0, max(-180.0, float(block["west"])))
+        east = min(180.0, max(-180.0, float(block["east"])))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if south > north:
+        south, north = north, south
+    if west > east:
+        west, east = east, west
+
+    mid_lat = (south + north) / 2.0
+    width_m = (east - west) * m_per_deg_lon(mid_lat)
+    height_m = (north - south) * M_PER_DEG_LAT
+    if width_m < 5 or height_m < 5:
+        return None
+
+    name = str(block.get("name") or "").strip() or f"Block {index + 1}"
+    return {
+        "id": str(block.get("id") or "").strip() or f"b{index + 1}",
+        "name": name[:60],
+        "south": south, "west": west, "north": north, "east": east,
+    }
+
+
+def block_dimensions(block):
+    """Width (east-west) and height (north-south) in metres, plus the area."""
+    mid_lat = (block["south"] + block["north"]) / 2.0
+    width_m = (block["east"] - block["west"]) * m_per_deg_lon(mid_lat)
+    height_m = (block["north"] - block["south"]) * M_PER_DEG_LAT
+    return {
+        "width_m": round(width_m, 1),
+        "height_m": round(height_m, 1),
+        "area_ha": round(width_m * height_m / 10_000.0, 3),
+        "centre_lat": mid_lat,
+        "centre_lon": (block["west"] + block["east"]) / 2.0,
+    }
+
+
+def block_by_id(blocks, block_id):
+    return next((b for b in (blocks or []) if b.get("id") == block_id), None)
+
+
 # Typical F450 mapping speed. Slow enough that 5000 us of shutter does not smear.
 DEFAULT_SURVEY_SPEED_MS = 3.0
 # Measured: raw JPEG + heatmap + false colour + thumbnail + npz at 8 MP.
@@ -539,7 +608,8 @@ USABLE_FLIGHT_MINUTES = 10.0
 
 
 def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
-                 forward_overlap=0.40, side_overlap=0.30, plot_side_m=320,
+                 forward_overlap=0.40, side_overlap=0.30, plot_side_m=None,
+                 plot_w_m=None, plot_h_m=None,
                  speed_ms=DEFAULT_SURVEY_SPEED_MS, resolution=(3280, 2464)):
     """Work out what to type into Mission Planner for a given altitude.
 
@@ -547,6 +617,12 @@ def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
     which is the usual way round because it maximises swath width. So the
     62.2-degree axis sets the line spacing and the 48.8-degree axis sets how far
     apart the photos are along each line.
+
+    The block is a rectangle, `plot_w_m` x `plot_h_m` -- real plots are not
+    squares. `plot_side_m` is a shorthand for a square one. **Flight lines run
+    along the block's longer axis**, because each turn costs battery and altitude
+    hold: a 200 x 60 m strip flown the long way is 6 lines and 5 turns, flown the
+    short way it is 20 lines and 19 turns for the same ground.
 
     Overlap defaults are deliberately modest. This system places each photo by
     telemetry rather than stitching a true orthomosaic, so it needs only enough
@@ -567,13 +643,23 @@ def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
     photo_spacing = along_h * (1.0 - forward_overlap)
     line_spacing = swath_w * (1.0 - side_overlap)
 
-    side = max(10.0, float(plot_side_m))
-    lines = max(1, math.ceil(side / max(0.5, line_spacing)))
-    per_line = max(1, math.ceil(side / max(0.5, photo_spacing)) + 1)
+    # A square shorthand, an explicit rectangle, or the placeholder.
+    if plot_w_m is None and plot_h_m is None and plot_side_m is None:
+        plot_side_m = PLACEHOLDER_BLOCK_M
+    width = max(10.0, float(plot_w_m if plot_w_m is not None else plot_side_m))
+    height = max(10.0, float(plot_h_m if plot_h_m is not None else plot_side_m))
+
+    # Fly the long way. `across` is the axis the lines step along.
+    along = max(width, height)
+    across = min(width, height)
+    line_direction = ("east–west" if width >= height else "north–south")
+
+    lines = max(1, math.ceil(across / max(0.5, line_spacing)))
+    per_line = max(1, math.ceil(along / max(0.5, photo_spacing)) + 1)
     photos = lines * per_line
 
     # Lawnmower path: every leg, plus the turns between them.
-    path_m = lines * side + (lines - 1) * line_spacing
+    path_m = lines * along + (lines - 1) * line_spacing
     minutes = path_m / max(0.3, float(speed_ms)) / 60.0
 
     gsd_cm = swath_w / max(1, resolution[0]) * 100 if resolution else None
@@ -582,8 +668,8 @@ def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
     if minutes > USABLE_FLIGHT_MINUTES:
         warnings.append(
             f"About {minutes:.0f} minutes of flying — more than one 3S pack "
-            f"realistically covers. Split the plot into blocks, fly higher, or "
-            f"reduce the overlap.")
+            f"realistically covers. Split this block into smaller ones, fly "
+            f"higher, or reduce the overlap.")
     if photo_spacing < 1.5:
         warnings.append(
             f"Photos every {photo_spacing:.1f} m is faster than the camera can "
@@ -606,8 +692,10 @@ def mission_plan(altitude_m, fov_h_deg=62.2, fov_v_deg=48.8,
         # the two numbers that go into Mission Planner
         "trigger_distance_m": round(photo_spacing, 1),
         "line_spacing_m": round(line_spacing, 1),
-        "plot_side_m": round(side),
-        "plot_area_ha": round(side * side / 10_000.0, 2),
+        "plot_w_m": round(width),
+        "plot_h_m": round(height),
+        "plot_area_ha": round(width * height / 10_000.0, 2),
+        "line_direction": line_direction,
         "lines": lines,
         "photos_per_line": per_line,
         "photos": photos,

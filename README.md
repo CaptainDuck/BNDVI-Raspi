@@ -86,10 +86,10 @@ that you never need a terminal.
 | View | What it does |
 |---|---|
 | **Set up the camera** | Guided calibration walkthrough — see below |
-| **Farm map** | Satellite basemap with four ways to see a flight — every photo drawn at the ground it actually covers, an averaged grid, three bands, or imagery alone — plus photo pins, the flight track, a per-cell hover readout, plain-language summary and trend. Before the first flight it's where you find the farm on the imagery and mark the block to survey |
+| **Farm map** | Satellite basemap with four ways to see a flight — every photo drawn at the ground it actually covers, an averaged grid, three bands, or imagery alone — plus photo pins, the flight track, a per-cell hover readout, plain-language summary and trend. Also where you draw and name each plot you fly, corner to corner on the imagery |
 | **New flight** | Pre-flight checklist (camera, storage, MAVLink, GPS fix, mission), mission details read live off the Pixhawk, a mission planner that turns an altitude into the two numbers Mission Planner needs, trigger source, then live telemetry while recording |
 | **Processing** | Post-landing progress: aggregate, map, save |
-| **All flights** | Every flight, grouped by month, searchable and filterable by block |
+| **All flights** | Every flight, grouped by month, searchable and filterable by the block names you drew on the map |
 | **Photo detail** | False colour / heatmap / raw, statistics, channel means, capture settings, GPS |
 | **Debug** | Live feed with four synchronised renders + channel split + histogram, every calibration knob as a live control, white-card calibration, and the device log |
 | **Settings** | Persisted camera values, thresholds, offline-map download and coverage, MAVLink connection, device actions, activity log |
@@ -167,17 +167,23 @@ tiles, 1.9 MB, zoom 16–19**, covering 54.9 ha at up to 29 cm per pixel.
 
 That 54.9 ha is deliberately much larger than anything the drone flies. It is
 ground to *search*, because the farm's exact outline near Vis Compound isn't known
-yet. Two areas, kept separate everywhere in the UI:
+yet. Two things, kept separate everywhere in the UI:
 
 | | What it is | Where you set it |
 |---|---|---|
-| **Vicinity** | The imagery on the Pi's disk. Tens of hectares. | Settings → Offline map |
-| **Survey block** | The one or two hectares the drone actually flies. | Farm map → *Mark the block you fly* |
+| **Vicinity** | The imagery on the Pi's disk. Tens of hectares, one box. | Settings → Offline map |
+| **Survey blocks** | The plots the drone actually flies. A *list* of named rectangles. | Farm map → *Add a block* |
 
-Open the farm map, pan around the satellite view until you recognise the dragon
-fruit rows, and click to mark the block. Everything the mission planner says —
-altitude, photo spacing, photo count, flight time, storage — is scaled to that
-block. Unmarked, it plans against a placeholder and says so.
+Open the farm map, pan around until you recognise the dragon fruit rows, then
+click one corner of a plot and the opposite corner, and name it. Repeat for each
+plot — a farm has several, and none of them are square, so blocks are rectangles
+drawn corner to corner rather than a centre and a radius.
+
+The names you give them are the choices on the **All flights** filter, so there is
+one list to manage rather than two that drift apart. Everything the mission
+planner says — altitude, photo spacing, photo count, flight time, storage — is
+scaled to whichever block you pick. With nothing drawn it plans against a
+placeholder square and says so.
 
 If the farm turns out to lie outside the downloaded imagery, move the vicinity
 centre in Settings and download again.
@@ -199,9 +205,15 @@ purpose: photos are placed by telemetry, not stitched into a true orthomosaic, s
 they need only enough overlap to survive GPS wander. Raise both to 70–80% if you
 ever switch to real photogrammetry.
 
+**Flight lines run along each block's longer side.** Every turn costs battery and
+altitude hold, so a 200 × 60 m strip flown the long way is 6 lines and 5 turns;
+flown the short way it is 20 lines and 19 turns for exactly the same ground. The
+planner tells you which way round to set the survey grid.
+
 The card also warns when a plan doesn't fit a battery. A 1 ha block at 12 m is
 170 photos and about 6 minutes; the whole 54.9 ha vicinity would be 1600 photos
-and an hour, which is five packs — hence the two areas being separate.
+and an hour, which is five packs — hence blocks being separate from the vicinity,
+and being a list rather than one big box.
 
 ## Calibration
 
@@ -281,13 +293,13 @@ pip install -r hylocropter/requirements-dev.txt
 pytest
 ```
 
-152 tests, about 11 seconds, no hardware needed:
+183 tests, about 10 seconds, no hardware needed:
 
 | File | What it pins down |
 |---|---|
 | `test_index.py` | The plant-health maths. That NIR is the **red** channel and healthy foliage reads positive; that the bands have no gap or overlap at the thresholds; that a `k` solved off a white card actually zeroes that card; that the gel-missing check catches a missing gel; and that `colormap.js` still matches `BNDVI_COLOR_STOPS` |
-| `test_mapping.py` | Photo → footprint → bounds → grid → mission plan. Including the two rules that keep the map honest: **unvisited cells stay `null`**, and **row 0 is the northern edge** |
-| `test_store.py` | The JSON indexes under concurrent writes, legacy migration, settings clamping, the survey block being nullable |
+| `test_mapping.py` | Photo → footprint → bounds → grid → mission plan, plus the block rectangles: corners sorted whichever way they were clicked, lines along the longer axis, and the two rules that keep the map honest — **unvisited cells stay `null`**, and **row 0 is the northern edge** |
+| `test_store.py` | The JSON indexes under concurrent writes, legacy migration, settings clamping, and the survey blocks — validation, de-duplication, and migrating the old single square into one |
 | `test_routes.py` | Every page renders with no camera and no drone, and `/api/*` errors return JSON |
 
 `.github/workflows/verify.yml` runs all of that in **one job**, plus four things
