@@ -302,7 +302,31 @@ def page_new_flight():
         resolution=tuple(config.get("resolution")))
     return render_template("newflight.html", view="newflight", checks=checks,
                            storage=storage, est_photos=est_photos, plan=plan,
-                           selected_block=first, **_shell())
+                           selected_block=first,
+                           test_areas=flights_mod.TEST_AREAS, **_shell())
+
+
+@app.route("/plan")
+def page_plan():
+    """The mission planner on its own, for working numbers out before the farm.
+
+    Deliberately independent of the camera, the flight controller and the map --
+    it is trigonometry, so it has to work at a desk with the rig switched off.
+    """
+    blocks = _blocks_with_dims()
+    # Default to a football field rather than a block: someone opening this page
+    # with nothing drawn is almost certainly planning a rehearsal.
+    default = blocks[0] if blocks else flights_mod.test_area_by_id("t-pitch")
+    plan = flights_mod.mission_plan(
+        altitude_m=12,
+        fov_h_deg=config.get("fov_h_deg"), fov_v_deg=config.get("fov_v_deg"),
+        plot_w_m=default.get("width_m", default.get("w")),
+        plot_h_m=default.get("height_m", default.get("h")),
+        resolution=tuple(config.get("resolution")))
+    return render_template("plan.html", view="plan", plan=plan,
+                           test_areas=flights_mod.TEST_AREAS,
+                           usable_minutes=flights_mod.USABLE_FLIGHT_MINUTES,
+                           **_shell())
 
 
 @app.route("/processing")
@@ -745,11 +769,14 @@ def api_mission_plan():
     # A block id resolves to that block's real dimensions; explicit width and
     # height let the page recompute while the operator is still dragging, before
     # anything is saved.
-    block = flights_mod.block_by_id(config.get("survey_blocks"),
-                                    request.args.get("block"))
+    wanted = request.args.get("block")
+    block = flights_mod.block_by_id(config.get("survey_blocks"), wanted)
+    area = flights_mod.test_area_by_id(wanted)
     if block:
         dims = flights_mod.block_dimensions(block)
         plot_w, plot_h = dims["width_m"], dims["height_m"]
+    elif area:
+        plot_w, plot_h = area["w"], area["h"]
     else:
         plot_w = num("plot_w", flights_mod.PLACEHOLDER_BLOCK_M)
         plot_h = num("plot_h", plot_w)

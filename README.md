@@ -80,13 +80,14 @@ actually prescribes instead.
 
 ## The dashboard
 
-Eight views, all driveable from a phone on the Pi's hotspot. The design goal was
+Nine views, all driveable from a phone on the Pi's hotspot. The design goal was
 that you never need a terminal.
 
 | View | What it does |
 |---|---|
 | **Set up the camera** | Guided calibration walkthrough — see below |
 | **Farm map** | Satellite basemap with four ways to see a flight — every photo drawn at the ground it actually covers, an averaged grid, three bands, or imagery alone — plus photo pins, the flight track, a per-cell hover readout, plain-language summary and trend. Also where you draw and name each plot you fly, corner to corner on the imagery |
+| **Plan a flight** | The mission planner on its own — altitude, photo spacing, photo count, flight time and storage for any area. Needs no camera, no drone and no map, so you can work the numbers out at a desk and rehearse over a car park first |
 | **New flight** | Pre-flight checklist (camera, storage, MAVLink, GPS fix, mission), mission details read live off the Pixhawk, a mission planner that turns an altitude into the two numbers Mission Planner needs, trigger source, then live telemetry while recording |
 | **Processing** | Post-landing progress: aggregate, map, save |
 | **All flights** | Every flight, grouped by month, searchable and filterable by the block names you drew on the map |
@@ -190,8 +191,8 @@ centre in Settings and download again.
 
 ## Planning the mission
 
-**New flight → Planning the mission** works the two numbers out from the lens
-geometry (62.2° × 48.8°, so `2·h·tan(fov/2)`) rather than a rule of thumb:
+**Plan a flight** (or the same card on New flight) works the two numbers out from
+the lens geometry (62.2° × 48.8°, so `2·h·tan(fov/2)`) rather than a rule of thumb:
 
 | Altitude | Each photo covers | `CAM_TRIGG_DIST` | Line spacing | Detail |
 |---|---|---|---|---|
@@ -214,6 +215,28 @@ The card also warns when a plan doesn't fit a battery. A 1 ha block at 12 m is
 170 photos and about 6 minutes; the whole 54.9 ha vicinity would be 1600 photos
 and an hour, which is five packs — hence blocks being separate from the vicinity,
 and being a list rather than one big box.
+
+### Planning before you go to the farm
+
+You don't need a drawn block, a camera, a flight controller or the offline map to
+plan — it's trigonometry. **Plan a flight** is the planner on its own, with a set
+of practice areas so you can rehearse somewhere you can walk to:
+
+| Practice area | Size | At 12 m |
+|---|---|---|
+| Basketball court | 28 × 15 m | 12 photos, under a minute |
+| Yard or car park | 40 × 30 m | 32 photos, ~1.5 min |
+| **Football field** | 105 × 68 m | **126 photos, 4.4 min** |
+| One hectare | 100 × 100 m | 170 photos, ~6 min |
+
+All four fit inside one 3S pack on purpose — a rehearsal you can't finish teaches
+you nothing. Fly the same altitude and trigger distance you plan to use at the
+farm, then **compare the photo count you actually got against the number the page
+predicted.** If they disagree, the trigger isn't firing the way you think, and
+that is much better to discover at school than in Tanauan.
+
+The page remembers your last plan, and prints, so you can take the numbers with
+you.
 
 ## Calibration
 
@@ -293,7 +316,7 @@ pip install -r hylocropter/requirements-dev.txt
 pytest
 ```
 
-183 tests, about 10 seconds, no hardware needed:
+195 tests, about 10 seconds, no hardware needed:
 
 | File | What it pins down |
 |---|---|

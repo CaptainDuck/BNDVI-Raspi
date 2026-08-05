@@ -1,0 +1,144 @@
+{# Mission planning calculator.
+   Shared by /plan and /new-flight, because the maths and the Mission Planner
+   instructions are identical and two copies would drift. The only difference is
+   framing: /plan is for working out numbers at home, /new-flight is for checking
+   them minutes before take-off.
+
+   Everything here is geometry — no camera, no flight controller, no GPS. So it
+   works with the whole rig switched off, which is the point of planning ahead. #}
+{% from "_partials/macros.html" import kv %}
+
+<div class="card elev-sm" style="margin-bottom:16px" id="mission-planner"
+     data-plan='{{ plan|tojson }}'
+     data-areas='{{ (blocks or [])|tojson }}'
+     data-tests='{{ test_areas|tojson }}'>
+  <span class="card-kicker">Planning the mission</span>
+  <div class="card-title">What to set in Mission Planner</div>
+  <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
+    Pick an altitude and how much you want consecutive photos to overlap. These
+    are worked out from the camera's actual lens geometry
+    ({{ cfg.fov_h_deg }}° × {{ cfg.fov_v_deg }}°), so they are specific to this
+    rig rather than rules of thumb.
+  </div>
+
+  {# What are we flying over? Drawn blocks if there are any, a practice area if
+     you're rehearsing somewhere else, or just type the size. All three are
+     legitimate — only the first is tied to real ground. #}
+  <div class="field" style="max-width:360px">
+    <label for="mp-block">What are you flying over?</label>
+    <select class="input" id="mp-block">
+      {% if blocks %}
+        <optgroup label="Your blocks">
+          {% for b in blocks %}
+            <option value="{{ b.id }}">{{ b.name }} —
+              {{ b.width_m|round|int }} × {{ b.height_m|round|int }} m
+              ({{ '%.2f'|format(b.area_ha) }} ha)</option>
+          {% endfor %}
+        </optgroup>
+      {% endif %}
+      <optgroup label="Somewhere to practise">
+        {% for a in test_areas %}
+          <option value="{{ a.id }}" {{ 'selected' if not blocks and loop.index == 3 }}>
+            {{ a.name }} — {{ a.w }} × {{ a.h }} m</option>
+        {% endfor %}
+      </optgroup>
+      <option value="">Type the size myself</option>
+    </select>
+    <div style="font-size:12px;margin-top:4px;color:color-mix(in srgb, var(--color-text) 60%, transparent)"
+         id="mp-block-note"></div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+    <div class="control-group">
+      <div class="control-head"><span>Altitude above launch</span>
+        <span class="val" id="mp-alt-label">12 m</span></div>
+      <input type="range" id="mp-alt" min="5" max="60" step="1" value="12"
+             aria-label="Mission altitude">
+    </div>
+    <div class="control-group">
+      <div class="control-head"><span>Overlap along the line</span>
+        <span class="val" id="mp-fwd-label">40%</span></div>
+      <input type="range" id="mp-fwd" min="0" max="85" step="5" value="40"
+             aria-label="Forward overlap">
+    </div>
+    <div class="control-group">
+      <div class="control-head"><span>Overlap between lines</span>
+        <span class="val" id="mp-side-label">30%</span></div>
+      <input type="range" id="mp-side" min="0" max="85" step="5" value="30"
+             aria-label="Side overlap">
+    </div>
+    <div class="field">
+      <label for="mp-plot-w">Area width (m)</label>
+      <input class="input" type="number" id="mp-plot-w" min="10" max="2000"
+             step="5" value="{{ plan.plot_w_m }}">
+    </div>
+    <div class="field">
+      <label for="mp-plot-h">Area depth (m)</label>
+      <input class="input" type="number" id="mp-plot-h" min="10" max="2000"
+             step="5" value="{{ plan.plot_h_m }}">
+    </div>
+  </div>
+
+  {# the two values that actually get typed in #}
+  <div class="mp-outputs">
+    <div class="mp-output">
+      <span class="mp-output-label">Photo every</span>
+      <span class="mp-output-value" id="mp-trigger">—</span>
+      <code>CAM_TRIGG_DIST</code>
+    </div>
+    <div class="mp-output">
+      <span class="mp-output-label">Line spacing</span>
+      <span class="mp-output-value" id="mp-spacing">—</span>
+      <code>Survey grid → Distance between lines</code>
+    </div>
+  </div>
+
+  <div class="kv">
+    {{ kv('Each photo covers', '—', 'mp-footprint') }}
+    {{ kv('Detail on the ground', '—', 'mp-gsd') }}
+    {{ kv('Photos for this area', '—', 'mp-photos') }}
+    {{ kv('Flight lines', '—', 'mp-lines') }}
+    {{ kv('Fly the lines', '—', 'mp-direction') }}
+    {{ kv('Time in the air', '—', 'mp-time') }}
+    {{ kv('Storage needed', '—', 'mp-storage') }}
+  </div>
+
+  <div id="mp-warnings"></div>
+
+  <details style="font-size:13px">
+    <summary style="cursor:pointer;font-family:var(--font-heading);font-size:15px">
+      How to enter this in Mission Planner</summary>
+    <ol style="padding-left:20px;line-height:1.6;margin-top:8px">
+      <li><strong>Flight Plan</strong> tab. Right-click the map →
+        <em>Draw Polygon</em> and trace the area you want surveyed.</li>
+      <li>Right-click again → <strong>Auto WP → Survey (Grid)</strong>.</li>
+      <li>In the Simple tab set <strong>Altitude</strong> to the value above.
+        Tick <em>Advanced Options</em> to reveal the rest.</li>
+      <li>Set <strong>Distance between lines</strong> to the line spacing above.
+        Mission Planner may compute its own value from a camera profile —
+        override it with this one, which is based on your actual lens.</li>
+      <li>Set <strong>Camera trigger distance</strong> to the photo spacing
+        above. That writes a <code>DO_SET_CAM_TRIGG_DIST</code> command into the
+        mission, which is what makes the Pi take photos.</li>
+      <li>Check the <strong>angle</strong> so the lines run
+        <strong id="mp-direction-2">along the longer side</strong> — turns cost
+        battery, and Mission Planner does not always pick the cheap direction.</li>
+      <li>Set the flight speed to about <strong id="mp-speed">3 m/s</strong> —
+        fast enough to finish, slow enough that a 5000 µs shutter does not
+        smear.</li>
+      <li><strong>Accept</strong>, then <strong>Write</strong> the mission to the
+        aircraft.</li>
+    </ol>
+    <p style="margin:8px 0 0">Alternatively skip the survey tool and set the
+      <code>CAM_TRIGG_DIST</code> parameter directly in
+      <strong>Config → Full Parameter List</strong>. Same effect, but it then
+      applies to every mission rather than just this one.</p>
+  </details>
+
+  <div class="text-muted" style="font-size:12.5px">
+    Overlap defaults are modest on purpose: this system places each photo by GPS
+    rather than stitching a true orthomosaic, so it needs only enough overlap to
+    avoid gaps when the GPS wanders. If you later switch to real photogrammetry,
+    raise both to 70–80%.
+  </div>
+</div>

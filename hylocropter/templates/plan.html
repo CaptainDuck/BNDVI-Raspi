@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Plan a flight — Hylocropter{% endblock %}
+
+{% block content %}
+{# Planning is pure geometry, so this page works with the camera unplugged, the
+   Pixhawk unplugged, and nowhere near the farm. That is the point of it: you work
+   the numbers out at your desk, type them into Mission Planner, and rehearse over
+   a car park before anyone drives to Tanauan. #}
+<div style="max-width:780px">
+  <div class="row hc-noprint" style="margin-bottom:16px">
+    <div class="grow">
+      <h2 style="margin:0 0 2px">Plan a flight</h2>
+      <p class="page-sub">Work out the altitude and photo spacing for any patch of
+        ground — one of your blocks, or somewhere to practise first.</p>
+    </div>
+    <button class="btn btn-secondary" onclick="window.print()">Save as PDF</button>
+  </div>
+
+  <div class="card elev-sm hc-noprint" style="margin-bottom:16px;background:var(--color-accent-2-100)">
+    <span class="card-kicker" style="color:var(--color-accent-2-800)">Before the farm</span>
+    <div style="font-size:14px;line-height:1.5">
+      Nothing here needs the camera, the drone or a GPS fix — it is worked out from
+      the lens geometry alone, so you can plan and print at your desk. Rehearse
+      over a field or car park you can walk: fly the same altitude and trigger
+      distance you intend to use at the farm, then check the photo count you
+      actually got against the number below. If they disagree, the trigger is not
+      firing the way you think it is, and that is much better to discover at
+      school.
+    </div>
+  </div>
+
+  {% include "_partials/planner.html" %}
+
+  <div class="card elev-sm">
+    <span class="card-kicker">What this does not tell you</span>
+    <div style="font-size:13.5px;line-height:1.55">
+      These are geometric numbers: how much ground a photo covers, how many of
+      them fit, how long the path is at a given speed. They assume the camera
+      points straight down, the drone holds altitude, and every trigger produces a
+      saved photo. Whether that last one is true is exactly what a practice flight
+      is for — and it is the one thing that has never been tested against real
+      hardware here
+      (<a href="{{ url_for('page_settings') }}">RESEARCH-GAPS.md §7</a>).
+      Battery figures assume {{ usable_minutes }} usable minutes on a 3S pack,
+      which is optimistic in wind.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/planner.js') }}"></script>
+{% endblock %}

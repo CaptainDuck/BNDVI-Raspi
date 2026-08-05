@@ -46,139 +46,22 @@
       </div>
     </div>
 
-    {# ── mission planning calculator ─────────────────────────────────────
-       Answers "what altitude, and how far apart should the photos be?" with the
-       two numbers that go straight into Mission Planner, worked out from the
-       lens geometry rather than guessed. #}
-    <div class="card elev-sm" style="margin-bottom:16px" id="mission-planner"
-         data-plan='{{ plan|tojson }}'>
-      <span class="card-kicker">Planning the mission</span>
-      <div class="card-title">What to set in Mission Planner</div>
-      <div style="font-size:13.5px;color:color-mix(in srgb, var(--color-text) 68%, transparent)">
-        Pick an altitude and how much you want consecutive photos to overlap.
-        These are worked out from the camera's actual lens geometry
-        ({{ cfg.fov_h_deg }}° × {{ cfg.fov_v_deg }}°), so they are specific to
-        this rig rather than rules of thumb.
-      </div>
+    {# The planner, shared with /plan. Here it is a last check before take-off;
+       there it is for working the numbers out at home. #}
+    {% include "_partials/planner.html" %}
 
-      {# Which block, and is it real? The offline imagery covers a whole
-         neighbourhood; the drone flies one plot of it. Planning against the wrong
-         one is the difference between six minutes and an hour in the air. #}
-      {% if blocks %}
-        <div class="field" style="max-width:320px">
-          <label for="mp-block">Which block are you flying?</label>
-          <select class="input" id="mp-block" data-blocks='{{ blocks|tojson }}'>
-            {% for b in blocks %}
-              <option value="{{ b.id }}">{{ b.name }} —
-                {{ b.width_m|round|int }} × {{ b.height_m|round|int }} m
-                ({{ '%.2f'|format(b.area_ha) }} ha)</option>
-            {% endfor %}
-            <option value="">Something else — type the size</option>
-          </select>
-        </div>
-      {% else %}
+    {% if not blocks %}
+      <div class="card elev-sm" style="margin-bottom:16px;background:var(--color-accent-100)">
         <div style="font-size:13px;display:flex;gap:8px;align-items:flex-start">
           <span class="check-mark bad">!</span>
-          <div>No blocks drawn yet, so this assumes a placeholder
-            {{ plan.plot_w_m }} × {{ plan.plot_h_m }} m square. Find your rows on
-            the <a href="{{ url_for('page_map') }}">farm map</a> and draw a box
-            around one plot — the photo count, flight time and battery estimate
-            below all depend on it.</div>
-        </div>
-      {% endif %}
-
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
-        <div class="control-group">
-          <div class="control-head"><span>Altitude above launch</span>
-            <span class="val" id="mp-alt-label">12 m</span></div>
-          <input type="range" id="mp-alt" min="5" max="60" step="1" value="12"
-                 aria-label="Mission altitude">
-        </div>
-        <div class="control-group">
-          <div class="control-head"><span>Overlap along the line</span>
-            <span class="val" id="mp-fwd-label">40%</span></div>
-          <input type="range" id="mp-fwd" min="0" max="85" step="5" value="40"
-                 aria-label="Forward overlap">
-        </div>
-        <div class="control-group">
-          <div class="control-head"><span>Overlap between lines</span>
-            <span class="val" id="mp-side-label">30%</span></div>
-          <input type="range" id="mp-side" min="0" max="85" step="5" value="30"
-                 aria-label="Side overlap">
-        </div>
-        <div class="field">
-          <label for="mp-plot-w">Block width (m)</label>
-          <input class="input" type="number" id="mp-plot-w" min="10" max="2000"
-                 step="10" value="{{ plan.plot_w_m }}">
-        </div>
-        <div class="field">
-          <label for="mp-plot-h">Block depth (m)</label>
-          <input class="input" type="number" id="mp-plot-h" min="10" max="2000"
-                 step="10" value="{{ plan.plot_h_m }}">
+          <div>No blocks drawn yet, so the plan above is not tied to any real
+            ground. That is fine for a practice flight. When you do fly the farm,
+            draw the plot on the <a href="{{ url_for('page_map') }}">farm map</a>
+            first so the photo count and flight time match what you are actually
+            covering.</div>
         </div>
       </div>
-
-      {# the two values that actually get typed in #}
-      <div class="mp-outputs">
-        <div class="mp-output">
-          <span class="mp-output-label">Photo every</span>
-          <span class="mp-output-value" id="mp-trigger">—</span>
-          <code>CAM_TRIGG_DIST</code>
-        </div>
-        <div class="mp-output">
-          <span class="mp-output-label">Line spacing</span>
-          <span class="mp-output-value" id="mp-spacing">—</span>
-          <code>Survey grid → Distance between lines</code>
-        </div>
-      </div>
-
-      <div class="kv">
-        {{ kv('Each photo covers', '—', 'mp-footprint') }}
-        {{ kv('Detail on the ground', '—', 'mp-gsd') }}
-        {{ kv('Photos for this block', '—', 'mp-photos') }}
-        {{ kv('Flight lines', '—', 'mp-lines') }}
-        {{ kv('Fly the lines', '—', 'mp-direction') }}
-        {{ kv('Time in the air', '—', 'mp-time') }}
-        {{ kv('Storage needed', '—', 'mp-storage') }}
-      </div>
-
-      <div id="mp-warnings"></div>
-
-      <details style="font-size:13px">
-        <summary style="cursor:pointer;font-family:var(--font-heading);font-size:15px">
-          How to enter this in Mission Planner</summary>
-        <ol style="padding-left:20px;line-height:1.6;margin-top:8px">
-          <li><strong>Flight Plan</strong> tab. Right-click the map →
-            <em>Draw Polygon</em> and trace the block you want surveyed.</li>
-          <li>Right-click again → <strong>Auto WP → Survey (Grid)</strong>.</li>
-          <li>In the Simple tab set <strong>Altitude</strong> to the value above.
-            Tick <em>Advanced Options</em> to reveal the rest.</li>
-          <li>Set <strong>Distance between lines</strong> to the line spacing
-            above. Mission Planner may compute its own value from a camera
-            profile — override it with this one, which is based on your actual
-            lens.</li>
-          <li>Set <strong>Camera trigger distance</strong> to the photo spacing
-            above. That writes a <code>DO_SET_CAM_TRIGG_DIST</code> command into
-            the mission, which is what makes the Pi take photos.</li>
-          <li>Set the flight speed to about
-            <strong id="mp-speed">3 m/s</strong> — fast enough to finish, slow
-            enough that a 5000 µs shutter does not smear.</li>
-          <li><strong>Accept</strong>, then <strong>Write</strong> the mission to
-            the aircraft.</li>
-        </ol>
-        <p style="margin:8px 0 0">Alternatively skip the survey tool and set the
-          <code>CAM_TRIGG_DIST</code> parameter directly in
-          <strong>Config → Full Parameter List</strong>. Same effect, but it then
-          applies to every mission rather than just this one.</p>
-      </details>
-
-      <div class="text-muted" style="font-size:12.5px">
-        Overlap defaults are modest on purpose: this system places each photo by
-        GPS rather than stitching a true orthomosaic, so it needs only enough
-        overlap to avoid gaps when the GPS wanders. If you later switch to real
-        photogrammetry, raise both to 70–80%.
-      </div>
-    </div>
+    {% endif %}
 
     <div class="card elev-sm" style="margin-bottom:16px">
       <span class="card-kicker">When to take a photo</span>
@@ -270,5 +153,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/planner.js') }}"></script>
 <script src="{{ url_for('static', filename='js/newflight.js') }}"></script>
 {% endblock %}

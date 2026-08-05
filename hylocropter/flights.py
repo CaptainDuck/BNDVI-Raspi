@@ -599,6 +599,27 @@ def block_by_id(blocks, block_id):
     return next((b for b in (blocks or []) if b.get("id") == block_id), None)
 
 
+# Areas you can practise over before going anywhere near the farm. Sizes only --
+# no coordinates, because the point is that they are wherever you happen to be,
+# and the offline imagery only covers Tanauan. Every mission number except the
+# map itself depends on the block's *dimensions*, so a size is enough to plan,
+# rehearse, and check the numbers against a real flight.
+TEST_AREAS = [
+    {"id": "t-court", "name": "Basketball court", "w": 28, "h": 15,
+     "note": "The smallest sane test. One pass, a handful of photos."},
+    {"id": "t-yard", "name": "Yard or car park", "w": 40, "h": 30,
+     "note": "Enough ground to see the lawnmower pattern work."},
+    {"id": "t-pitch", "name": "Football field", "w": 105, "h": 68,
+     "note": "About 0.7 ha — close to a real block, and a school has one."},
+    {"id": "t-hectare", "name": "One hectare", "w": 100, "h": 100,
+     "note": "The round number to sanity-check photo counts against."},
+]
+
+
+def test_area_by_id(area_id):
+    return next((a for a in TEST_AREAS if a["id"] == area_id), None)
+
+
 # Typical F450 mapping speed. Slow enough that 5000 us of shutter does not smear.
 DEFAULT_SURVEY_SPEED_MS = 3.0
 # Measured: raw JPEG + heatmap + false colour + thumbnail + npz at 8 MP.

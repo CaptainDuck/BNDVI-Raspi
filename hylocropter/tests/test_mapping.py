@@ -488,6 +488,57 @@ def test_a_drawn_block_plans_a_flight_that_fits_a_battery():
     assert not plan["warnings"]
 
 
+# ── practice areas ──────────────────────────────────────────────────────────
+
+def test_every_practice_area_is_complete_and_unique():
+    ids = [a["id"] for a in flights.TEST_AREAS]
+    assert len(set(ids)) == len(ids)
+    for a in flights.TEST_AREAS:
+        assert a["name"] and a["note"]
+        assert a["w"] >= 10 and a["h"] >= 10
+
+
+def test_practice_areas_are_all_small_enough_to_rehearse_on_one_battery():
+    """The point of them is a flight you can actually complete at school. One that
+    warned about the battery would be useless as a rehearsal."""
+    for a in flights.TEST_AREAS:
+        plan = flights.mission_plan(12, plot_w_m=a["w"], plot_h_m=a["h"])
+        assert plan["minutes"] < flights.USABLE_FLIGHT_MINUTES, a["name"]
+        assert not plan["warnings"], (a["name"], plan["warnings"])
+
+
+def test_practice_areas_span_a_useful_range():
+    """A basketball court and a hectare should not plan the same flight."""
+    smallest = min(flights.TEST_AREAS, key=lambda a: a["w"] * a["h"])
+    biggest = max(flights.TEST_AREAS, key=lambda a: a["w"] * a["h"])
+    assert (flights.mission_plan(12, plot_w_m=biggest["w"],
+                                plot_h_m=biggest["h"])["photos"]
+            > flights.mission_plan(12, plot_w_m=smallest["w"],
+                                   plot_h_m=smallest["h"])["photos"] * 3)
+
+
+def test_a_hectare_preset_really_is_a_hectare():
+    """The round number people sanity-check photo counts against."""
+    area = flights.test_area_by_id("t-hectare")
+    assert area["w"] * area["h"] == 10_000
+    plan = flights.mission_plan(12, plot_w_m=area["w"], plot_h_m=area["h"])
+    assert plan["plot_area_ha"] == pytest.approx(1.0)
+
+
+def test_test_area_by_id():
+    assert flights.test_area_by_id("t-pitch")["w"] == 105
+    assert flights.test_area_by_id("nope") is None
+    assert flights.test_area_by_id(None) is None
+
+
+def test_a_square_practice_area_still_picks_a_line_direction():
+    """One hectare is square, so neither axis is longer. It must still answer,
+    rather than leaving the field blank in the UI."""
+    area = flights.test_area_by_id("t-hectare")
+    plan = flights.mission_plan(12, plot_w_m=area["w"], plot_h_m=area["h"])
+    assert plan["line_direction"] in ("east–west", "north–south")
+
+
 # ── plain-language summary ───────────────────────────────────────────────────
 
 @pytest.mark.parametrize("mean,fragment", [

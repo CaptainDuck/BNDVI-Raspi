@@ -196,6 +196,23 @@ Expect one round of fixes here — message field names and integer scaling
 (lat/lon are 1e7-scaled, altitudes are millimetres) are the usual culprits, and
 none of this decoding has run against a real stream.
 
+### Rehearsal, before anyone drives to Tanauan
+
+Do this at school. It costs one battery and catches the failure that would
+otherwise waste a farm trip.
+
+- [ ] Open **Plan a flight**, pick *Football field* (or whatever you can walk),
+      set the altitude you intend to use at the farm, and note the predicted
+      **photo count** and **CAM_TRIGG_DIST**
+- [ ] Build that survey grid in Mission Planner with those two numbers
+- [ ] Fly it. Then **count the photos the Pi actually saved** and compare
+- [ ] Same count → the trigger path works end to end, which is the one thing CI
+      cannot prove. Different count → fix it here, not in Tanauan
+
+A count that is far too low usually means `DO_SET_CAM_TRIGG_DIST` never made it
+into the mission; far too high usually means an interval trigger is also running.
+Both are five-minute fixes on a bench and a ruined afternoon in a field.
+
 ### Offline
 
 - [ ] Download the basemap with internet, then **disconnect it**
@@ -216,8 +233,9 @@ pip install -r hylocropter/requirements-dev.txt
 pytest
 ```
 
-152 tests covering the index maths, the photo→footprint→grid mapping chain, the
-JSON store, the settings, and every route rendering with no camera and no drone.
+195 tests covering the index maths, the photo→footprint→grid mapping chain, the
+survey blocks, the JSON store, the settings, and every route rendering with no
+camera and no drone.
 `.github/workflows/verify.yml` runs the same suite on every push, in one job,
 plus the standalone-`bndvi.py` check, the app boot, and greps for a CDN reference
 or a reintroduced `(B − R)/(B + R)`.

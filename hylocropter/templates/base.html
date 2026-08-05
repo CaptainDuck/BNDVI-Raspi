@@ -66,6 +66,8 @@
          href="{{ url_for('page_map') }}">Farm map</a>
       <a class="tab {{ 'is-active' if view == 'history' }}"
          href="{{ url_for('page_history') }}">All flights</a>
+      <a class="tab {{ 'is-active' if view == 'plan' }}"
+         href="{{ url_for('page_plan') }}">Plan a flight</a>
       <a class="tab {{ 'is-active' if view == 'debug' }}"
          href="{{ url_for('page_debug') }}">Debug</a>
       <a class="tab {{ 'is-active' if view == 'settings' }}"

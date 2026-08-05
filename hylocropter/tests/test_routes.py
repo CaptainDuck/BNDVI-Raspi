@@ -46,8 +46,8 @@ def _clean_scratch():
 # ── pages ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("path", [
-    "/", "/new-flight", "/processing", "/history", "/debug", "/settings",
-    "/setup",
+    "/", "/plan", "/new-flight", "/processing", "/history", "/debug",
+    "/settings", "/setup",
 ])
 def test_every_page_renders_with_no_hardware(client, path):
     res = client.get(path)
@@ -192,6 +192,53 @@ def test_the_plan_endpoint_resolves_a_block_id(client):
     assert plan["plot_w_m"] > plan["plot_h_m"] * 3       # a long strip
     assert plan["line_direction"] == "east–west"         # flown the long way
     client.patch("/api/settings", json={"survey_blocks": []})
+
+
+def test_the_planner_works_with_no_blocks_no_camera_and_no_drone(client):
+    """Planning before going to the farm: pure geometry, so nothing needs to be
+    plugged in and no ground needs to have been marked."""
+    client.patch("/api/settings", json={"survey_blocks": []})
+    body = client.get("/plan").data.decode()
+    assert 'id="mission-planner"' in body
+    assert "Football field" in body            # somewhere to rehearse
+    assert "Type the size myself" in body
+    assert "No blocks drawn yet" not in body   # not an error state here
+    # and it is not gated on hardware
+    assert "Drone not connected" in body
+
+
+def test_the_planner_page_offers_every_practice_area(client):
+    body = client.get("/plan").data.decode()
+    for area in flights_mod.TEST_AREAS:
+        assert area["name"] in body
+
+
+def test_the_plan_endpoint_resolves_a_practice_area(client):
+    plan = client.get("/api/mission/plan?altitude_m=12&block=t-court").get_json()
+    assert plan["plot_w_m"] == 28 and plan["plot_h_m"] == 15
+    assert not plan["warnings"]
+
+
+def test_a_drawn_block_beats_a_practice_area_of_the_same_name(client):
+    """Ids are distinct namespaces, so a block id must win over the preset list
+    rather than the lookup order deciding by accident."""
+    client.patch("/api/settings", json={"survey_blocks": [
+        {"id": "b1", "name": "North block", "south": 14.1250, "west": 121.0750,
+         "north": 14.1259, "east": 121.0764},
+    ]})
+    plan = client.get("/api/mission/plan?altitude_m=12&block=b1").get_json()
+    assert plan["plot_w_m"] == pytest.approx(151, abs=2)
+    client.patch("/api/settings", json={"survey_blocks": []})
+
+
+def test_the_planner_lives_in_one_place(client):
+    """/plan and /new-flight share the partial, so the two must not drift."""
+    plan_page = client.get("/plan").data.decode()
+    flight_page = client.get("/new-flight").data.decode()
+    for marker in ('id="mp-trigger"', 'id="mp-spacing"', 'id="mp-direction"',
+                   'id="mp-block"', "CAM_TRIGG_DIST"):
+        assert marker in plan_page, marker
+        assert marker in flight_page, marker
 
 
 # ── captures ─────────────────────────────────────────────────────────────────

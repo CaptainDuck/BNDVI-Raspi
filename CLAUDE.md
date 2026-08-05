@@ -51,7 +51,7 @@ python hylocropter/app.py --debug                    # Flask reloader on
 
 ```bash
 pip install -r hylocropter/requirements-dev.txt
-pytest                            # 183 tests, from the repo root or anywhere
+pytest                            # 195 tests, from the repo root or anywhere
 pytest hylocropter/tests/test_index.py -v
 ```
 
@@ -207,6 +207,20 @@ names are managed — there used to be two lists and they drifted.
 `mission_plan()` takes `plot_w_m` / `plot_h_m` (or `plot_side_m` as a square
 shorthand) and **runs flight lines along the longer axis** — turns cost battery,
 so a 200×60 m strip is 6 lines rather than 20.
+
+**Planning is location-free on purpose.** `/plan` is the planner on its own, for
+working numbers out before anyone goes to the farm, so it must keep working with no
+blocks, no camera, no drone and no tiles — it is trigonometry. `flights.TEST_AREAS`
+are size-only practice areas (basketball court → one hectare) with no coordinates,
+because the point is that they are wherever you happen to be and the imagery only
+covers Tanauan. Every one of them is small enough to fly on one battery at 12 m,
+which `test_mapping.py` pins.
+
+The planner card lives in **`templates/_partials/planner.html`** with its JS in
+**`static/js/planner.js`**, shared by `/plan` and `/new-flight` — don't copy it
+into a third place. `/api/mission/plan?block=<id>` resolves either a drawn block or
+a practice area; explicit `plot_w`/`plot_h` is what the sliders send while you are
+still dragging.
 
 ### Storage
 
